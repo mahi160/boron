@@ -35,6 +35,8 @@ export type Settings = {
 	proofread: boolean;
 	tesseractFallback: boolean;
 	figures: boolean;
+	/** Whiten faint watermarks and paper tone in the images OCR reads. */
+	cleanScans: boolean;
 	prompts: Prompts;
 	tocDepth: number;
 };
@@ -69,6 +71,7 @@ export function defaultSettings(): Settings {
 		proofread: true,
 		tesseractFallback: true,
 		figures: true,
+		cleanScans: false,
 		prompts: { ...DEFAULT_PROMPTS },
 		tocDepth: 2,
 	};
@@ -198,6 +201,7 @@ export function parseSettings(input: unknown, stored: Settings): Settings | { er
 			proofread: input.proofread === true,
 			tesseractFallback: input.tesseractFallback === true,
 			figures: input.figures === true,
+			cleanScans: input.cleanScans === true,
 			prompts: { ocr: prompt("ocr"), proofread: prompt("proofread"), metadata: prompt("metadata") },
 			tocDepth: int(input, "tocDepth", 1, 6, "TOC depth"),
 		};
