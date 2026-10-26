@@ -45,6 +45,8 @@ export type PageRow = {
 	/** `provider/model` or `tesseract`. */
 	engine: string | null;
 	flag: string | null;
+	/** User-set printed page label; "" = the page has none, null = use what the model read. */
+	pageLabel: string | null;
 };
 
 export type BatchState = "queued" | "running" | "waiting" | "retrying" | "done" | "failed" | "aborted";
@@ -67,7 +69,17 @@ export type BatchRow = {
 };
 
 /** A page without its text, for lists and counts. */
-export type PageSummary = { page: number; status: PageStatus; engine: string | null; flag: string | null; edited: boolean; proofread: boolean };
+export type PageSummary = {
+	page: number;
+	status: PageStatus;
+	engine: string | null;
+	flag: string | null;
+	edited: boolean;
+	proofread: boolean;
+	/** Printed page number the model read, "" if none. */
+	printed: string;
+	pageLabel: string | null;
+};
 
 /** A task pi-durable set aside after it crashed the process repeatedly. */
 export type Parked = { taskId: TaskId; batchId: number | null; bookId: string | null; reason: string };
@@ -82,7 +94,7 @@ CREATE TABLE IF NOT EXISTS books (
 );
 CREATE TABLE IF NOT EXISTS pages (
 	book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, page INTEGER NOT NULL,
-	status TEXT NOT NULL CHECK (status IN ('pending', 'done', 'flagged', 'failed')), raw TEXT, proofread TEXT, edited TEXT, figures TEXT, engine TEXT, flag TEXT, PRIMARY KEY (book_id, page)
+	status TEXT NOT NULL CHECK (status IN ('pending', 'done', 'flagged', 'failed')), raw TEXT, proofread TEXT, edited TEXT, figures TEXT, engine TEXT, flag TEXT, page_label TEXT, PRIMARY KEY (book_id, page)
 );
 CREATE TABLE IF NOT EXISTS batches (
 	id INTEGER PRIMARY KEY AUTOINCREMENT, book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
@@ -138,6 +150,7 @@ function toPage(r: Row): PageRow {
 		figures: json<Figure[]>(r.figures),
 		engine: strOrNull(r.engine),
 		flag: strOrNull(r.flag),
+		pageLabel: strOrNull(r.page_label),
 	};
 }
 
@@ -193,6 +206,10 @@ export function openStore(path: string) {
 	const db = new DatabaseSync(path);
 	db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
 	db.exec(SCHEMA);
+	// Databases created before page labels existed.
+	if (!db.prepare("PRAGMA table_info(pages)").all().some((c) => c.name === "page_label")) {
+		db.exec("ALTER TABLE pages ADD COLUMN page_label TEXT");
+	}
 
 	function update(table: string, columns: Record<string, string>, where: string, id: SqlValue, patch: object) {
 		const entries = Object.entries(patch).filter(([key]) => key in columns);
@@ -241,7 +258,9 @@ export function openStore(path: string) {
 		pageSummaries(bookId: string): PageSummary[] {
 			const rows = db
 				.prepare(
-					"SELECT page, status, engine, flag, edited IS NOT NULL AS edited, proofread IS NOT NULL AS proofread FROM pages WHERE book_id = ? ORDER BY page",
+					`SELECT page, status, engine, flag, edited IS NOT NULL AS edited, proofread IS NOT NULL AS proofread, page_label,
+					COALESCE(NULLIF(json_extract(proofread, '$.printedPageNumber'), ''), json_extract(raw, '$.printedPageNumber'), '') AS printed
+					FROM pages WHERE book_id = ? ORDER BY page`,
 				)
 				.all(bookId);
 			return rows.map((r) => ({
@@ -251,6 +270,8 @@ export function openStore(path: string) {
 				flag: strOrNull(r.flag),
 				edited: r.edited === 1,
 				proofread: r.proofread === 1,
+				printed: String(r.printed),
+				pageLabel: strOrNull(r.page_label),
 			}));
 		},
 		page(bookId: string, page: number): PageRow | undefined {
@@ -269,6 +290,9 @@ export function openStore(path: string) {
 		},
 		saveEdit(bookId: string, page: number, markdown: string | null) {
 			db.prepare("UPDATE pages SET edited = ? WHERE book_id = ? AND page = ?").run(markdown, bookId, page);
+		},
+		savePageLabel(bookId: string, page: number, label: string | null) {
+			db.prepare("UPDATE pages SET page_label = ? WHERE book_id = ? AND page = ?").run(label, bookId, page);
 		},
 		saveFigures(bookId: string, page: number, figures: Figure[] | null) {
 			db.prepare("UPDATE pages SET figures = ? WHERE book_id = ? AND page = ?").run(
