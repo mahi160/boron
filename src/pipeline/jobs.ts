@@ -3,7 +3,7 @@ import type { UserInput } from "@earendil-works/pi-durable";
 import { cleanScan } from "../clean.ts";
 import { isObj, parseJson, unfence } from "../json.ts";
 import type { Settings, Stage } from "../settings.ts";
-import type { GlossaryEntry, PageRow } from "../store.ts";
+import type { BookKind, GlossaryEntry, PageRow } from "../store.ts";
 import { type PageResult, parsePageResults, parseProofread, proofreadText, type Suggestion, textResult, toSuggestions } from "./contract.ts";
 import type { Deps } from "./deps.ts";
 import {
@@ -25,13 +25,56 @@ export type Job = "pages" | "metadata" | "translate" | "glossary";
 /** One model request of a job. Translation steps use the proofread stage's providers. */
 export type Step = Stage | "translate" | "polish" | "glossary";
 
-export function providerStage(step: Step): Stage {
-	return step === "translate" || step === "polish" || step === "glossary" ? "proofread" : step;
-}
+/** What a step means for a batch's pages. */
+export type StepPolicy = {
+	/** Whose providers serve it. */
+	providers: Stage;
+	/** The page column its result is saved to: a draft translation as OCR text is, a polished one as proofread text. */
+	saveAs: "ocr" | "proofread";
+	/**
+	 * When it gives up. Required: the pages cannot do without its text, so they fail with `reason` (or are flagged).
+	 * Optional: the pages keep the earlier step's text, with `flag` if there was one.
+	 */
+	giveUp: { required: true; reason: string } | { required: false; flag: string | null };
+};
 
-export function firstStep(job: Job): Step {
-	return job === "metadata" ? "assemble" : job === "translate" ? "translate" : job === "glossary" ? "glossary" : "ocr";
-}
+export const STEPS: Record<Step, StepPolicy> = {
+	ocr: { providers: "ocr", saveAs: "ocr", giveUp: { required: true, reason: "Every OCR provider failed for these pages" } },
+	proofread: { providers: "proofread", saveAs: "proofread", giveUp: { required: false, flag: "Proofread failed; showing raw OCR" } },
+	assemble: { providers: "assemble", saveAs: "ocr", giveUp: { required: false, flag: null } },
+	translate: { providers: "proofread", saveAs: "ocr", giveUp: { required: true, reason: "No translation provider could translate this chunk" } },
+	polish: { providers: "proofread", saveAs: "proofread", giveUp: { required: false, flag: "Polish failed; showing the draft" } },
+	glossary: { providers: "proofread", saveAs: "ocr", giveUp: { required: false, flag: null } },
+};
+
+/** What a job does with its pages. */
+export type JobPolicy = {
+	/** Steps it runs, in order, under the current settings. */
+	steps: (settings: Settings) => [Step, ...Step[]];
+	/** Its pages are book text, marked done or failed with it. The metadata batch only looks at the title pages. */
+	ownsPages: boolean;
+	/** Pages per batch; null: all of them in one. */
+	batchSize: (settings: Settings) => number | null;
+};
+
+export const JOBS: Record<Job, JobPolicy> = {
+	pages: {
+		steps: (s) => (s.proofread ? ["ocr", "proofread"] : ["ocr"]),
+		ownsPages: true,
+		batchSize: (s) => s.pagesPerRequest,
+	},
+	metadata: { steps: () => ["assemble"], ownsPages: false, batchSize: () => null },
+	// One chunk per request: the previous chunk's translation is the next one's context.
+	translate: {
+		steps: (s) => (s.polish ? ["translate", "polish"] : ["translate"]),
+		ownsPages: true,
+		batchSize: () => 1,
+	},
+	glossary: { steps: () => ["glossary"], ownsPages: false, batchSize: () => null },
+};
+
+/** The job that reads a book's page rows, by the book's kind. */
+export const PAGE_JOB: Record<BookKind, Job> = { "pdf-ocr": "pages", "epub-translate": "translate" };
 
 export type BookMetadata = { title: string; author: string; publisher: string; year: string };
 
@@ -41,14 +84,6 @@ export type Parsed =
 	| { ok: true; metadata: BookMetadata }
 	| { ok: true; glossary: GlossaryEntry[] }
 	| { ok: false; error: string };
-
-/** Steps a job runs, in order, under the current settings. */
-export function jobStages(job: Job, settings: Settings): Step[] {
-	if (job === "metadata") return ["assemble"];
-	if (job === "glossary") return ["glossary"];
-	if (job === "translate") return settings.polish ? ["translate", "polish"] : ["translate"];
-	return settings.proofread ? ["ocr", "proofread"] : ["ocr"];
-}
 
 export function instructions(stage: Step, settings: Settings): string {
 	const figures = settings.figures ? "" : `\n${NO_FIGURES}`;

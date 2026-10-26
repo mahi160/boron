@@ -150,6 +150,36 @@ export function proofreadText(ocr: string, suggestions: readonly Suggestion[]): 
 	return active.reduce((text, s) => text.slice(0, s.at) + s.replace + text.slice(s.at + s.find.length), ocr);
 }
 
+export type Decision = { index: number; find: string; status: "accepted" | "rejected" };
+
+/**
+ * Accept or reject suggestions of a page and rebuild its proofread text from the OCR text. A decision names its
+ * suggestion by index and `find`, so one made on a page since read again does not hit another. A page the user edited
+ * keeps their text, with the change applied or undone in it; where that text no longer has the words exactly once,
+ * nothing is decided. Returns the page's new texts, or why it could not decide.
+ */
+export function decideSuggestions(
+	page: { raw: PageResult | null; proofread: PageResult | null; suggestions: Suggestion[] | null; edited: string | null },
+	decisions: readonly Decision[],
+): { proofread: PageResult; suggestions: Suggestion[]; edited: string | null } | { error: string } {
+	if (page.raw === null || page.proofread === null || page.suggestions === null) return { error: "This page has no proofreading suggestions" };
+	const suggestions = page.suggestions.map((s) => ({ ...s }));
+	let edited = page.edited;
+	for (const { index, find, status } of decisions) {
+		const s = suggestions[index];
+		if (s === undefined || s.find !== find || s.status === "auto") return { error: "The suggestions of this page changed; reload it" };
+		if (s.status === status) continue;
+		const change = status === "accepted" ? s : s.status === "accepted" ? { find: s.replace, replace: s.find } : null;
+		if (edited !== null && change !== null) {
+			const result = applyEdits(edited, [change]);
+			if (result.skipped > 0) return { error: `Your edited text does not have \u201c${change.find}\u201d exactly once; change it in the text box instead` };
+			edited = result.markdown;
+		}
+		s.status = status;
+	}
+	return { proofread: { ...page.proofread, markdown: proofreadText(page.raw.markdown, suggestions) }, suggestions, edited };
+}
+
 /** Parse and validate model output for the requested pages; extra pages are ignored. */
 export function parsePageResults(text: string, requested: readonly number[]): ParseResult {
 	let json: Json;

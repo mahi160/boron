@@ -13,7 +13,8 @@ import type { ProviderConfig } from "../settings.ts";
 import { textResult } from "./contract.ts";
 import type { Deps } from "./deps.ts";
 import { classifyError, errorMessage } from "./errors.ts";
-import { firstStep, instructions, type Job, jobStages, ocrImage, parseAnswer, providerStage, requestContent, type Step } from "./jobs.ts";
+import { failPages } from "./batches.ts";
+import { instructions, type Job, JOBS, ocrImage, parseAnswer, requestContent, type Step, STEPS } from "./jobs.ts";
 import { resetBounds } from "./reset.ts";
 
 export type BatchInput = { bookId: string; batchId: number; pages: number[]; job: Job };
@@ -35,11 +36,6 @@ type Task<P extends BatchState["phase"]> = RunningTask<BatchInput, Extract<Batch
 
 /** A model may answer badly twice; the third invalid answer flags the pages for review. */
 const MAX_INVALID = 3;
-
-/** Steps whose text the pages cannot do without: when they fail, the pages fail. The others keep the earlier step's text. */
-const required = (step: Step) => step === "ocr" || step === "translate";
-/** Jobs whose pages are book text, marked done or failed with the job. */
-const hasPages = (job: Job) => job === "pages" || job === "translate";
 
 function attempt(state: BatchState): Attempt {
 	return { stage: state.stage, skip: state.skip, pinned: state.pinned, invalid: state.invalid };
@@ -75,7 +71,7 @@ export function createBatchTask(deps: Deps) {
 
 	async function finish(task: Task<BatchState["phase"]>, runtime: Runtime, context: Context) {
 		const { bookId, pages, job } = task.input;
-		if (hasPages(job)) {
+		if (JOBS[job].ownsPages) {
 			for (const page of pages) if (store.page(bookId, page)?.status === "pending") store.markPage(bookId, page, "done", null);
 		}
 		setBatch(task, { state: "done", wakeAt: null, note: null });
@@ -84,15 +80,14 @@ export function createBatchTask(deps: Deps) {
 
 	/** Go on to the batch's next stage, or finish. */
 	async function advance(task: Task<BatchState["phase"]>, runtime: Runtime, context: Context) {
-		const stages = jobStages(task.input.job, deps.settings());
+		const stages = JOBS[task.input.job].steps(deps.settings());
 		const next = stages[stages.indexOf(task.state.checkpoint.stage) + 1];
 		if (next === undefined) return finish(task, runtime, context);
 		return pick(task, runtime, { stage: next, skip: [], pinned: null, invalid: 0 }, context);
 	}
 
 	async function fail(task: Task<BatchState["phase"]>, runtime: Runtime, reason: string, context: Context) {
-		const { bookId, pages, job } = task.input;
-		if (hasPages(job)) for (const page of pages) store.markPage(bookId, page, "failed", reason);
+		failPages(store, task.input, reason);
 		setBatch(task, { state: "failed", wakeAt: null, note: reason });
 		await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
 	}
@@ -115,17 +110,15 @@ export function createBatchTask(deps: Deps) {
 		const settings = deps.settings();
 		const ocrFallback = stage === "ocr" && task.input.job === "pages" && (configured.length === 0 || settings.tesseractFallback);
 		if (ocrFallback) return runTesseract(task, runtime, context);
-		if (!required(stage) && (configured.length === 0 || wake === undefined)) {
-			// No model for proofread, polish, metadata or the glossary (or all of them failed): keep what the earlier stage produced.
-			if ((stage === "proofread" || stage === "polish") && skip.length > 0) {
-				const flag = stage === "polish" ? "Polish failed; showing the draft" : "Proofread failed; showing raw OCR";
-				for (const page of task.input.pages) store.markPage(task.input.bookId, page, "done", flag);
+		const { giveUp } = STEPS[stage];
+		// No provider is out of quota only for a while: none is configured, or all of them failed.
+		if (wake === undefined) {
+			if (giveUp.required) return fail(task, runtime, giveUp.reason, context);
+			// An optional step: keep what the earlier step produced.
+			if (giveUp.flag !== null && skip.length > 0) {
+				for (const page of task.input.pages) store.markPage(task.input.bookId, page, "done", giveUp.flag);
 			}
 			return finish(task, runtime, context);
-		}
-		if (wake === undefined) {
-			const reason = stage === "translate" ? "No translation provider could translate this chunk" : "Every OCR provider failed for these pages";
-			return fail(task, runtime, reason, context);
 		}
 		const reset = new Date(wake).toISOString();
 		return sleep(task, runtime, wake, task.state.checkpoint, `All providers are out of quota until ${reset}`, context);
@@ -134,13 +127,13 @@ export function createBatchTask(deps: Deps) {
 	return defineTask<BatchInput, BatchState, null>({
 		name: "boron.batch",
 		version: 1,
-		initial: (input) => ({ phase: "pick", stage: firstStep(input.job), skip: [], pinned: null, invalid: 0 }),
+		initial: (input) => ({ phase: "pick", stage: JOBS[input.job].steps(deps.settings())[0], skip: [], pinned: null, invalid: 0 }),
 		phases: {
 			pick: async (task, runtime, context) => {
 				const settings = deps.settings();
 				const state = task.state.checkpoint;
 				const stage = state.stage;
-				const configured = settings.stages[providerStage(stage)].flatMap((id) => settings.providers.find((p) => p.id === id) ?? []);
+				const configured = settings.stages[STEPS[stage].providers].flatMap((id) => settings.providers.find((p) => p.id === id) ?? []);
 				const usable = configured.filter((p) => !state.skip.includes(p.id));
 				const ordered = [...usable.filter((p) => p.id === state.pinned), ...usable.filter((p) => p.id !== state.pinned)];
 				const now = deps.now();
@@ -244,16 +237,12 @@ export function createBatchTask(deps: Deps) {
 				if (!parsed.ok) {
 					const invalid = state.invalid + 1;
 					if (invalid < MAX_INVALID) return pick(task, runtime, { ...attempt(state), pinned: state.provider, invalid }, context);
-					const must = required(state.stage);
-					if (hasPages(job)) {
-						const flag = must
-							? `The model's answer was not valid (${parsed.error})`
-							: state.stage === "polish"
-								? "Polish failed; showing the draft"
-								: "Proofread failed; showing raw OCR";
-						for (const page of pages) store.markPage(bookId, page, must ? "flagged" : "done", flag);
+					const { giveUp } = STEPS[state.stage];
+					if (JOBS[job].ownsPages) {
+						const flag = giveUp.required ? `The model's answer was not valid (${parsed.error})` : giveUp.flag;
+						for (const page of pages) store.markPage(bookId, page, giveUp.required ? "flagged" : "done", flag);
 					}
-					return must ? finish(task, runtime, context) : advance(task, runtime, context);
+					return giveUp.required ? finish(task, runtime, context) : advance(task, runtime, context);
 				}
 				const engine = `${provider?.name ?? state.provider} · ${provider?.model ?? ""}`;
 				if ("glossary" in parsed) {
@@ -261,9 +250,7 @@ export function createBatchTask(deps: Deps) {
 					if (store.book(bookId)?.glossary === null) store.updateBook(bookId, { glossary: parsed.glossary });
 				} else if ("pages" in parsed) {
 					for (const result of parsed.pages) {
-						// A draft translation is stored as the OCR text is, the polished one as the proofread text.
-						const stage = state.stage === "proofread" || state.stage === "polish" ? "proofread" : "ocr";
-						store.saveResult(bookId, result, stage, engine, false, parsed.suggestions?.get(result.page) ?? null);
+						store.saveResult(bookId, result, STEPS[state.stage].saveAs, engine, false, parsed.suggestions?.get(result.page) ?? null);
 					}
 				}
 				else {

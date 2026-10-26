@@ -1,10 +1,10 @@
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { defineTask, type TaskId, type Tx } from "@earendil-works/pi-durable";
+import { defineTask, type TaskId } from "@earendil-works/pi-durable";
 import { chunkMarkdown, readEpub } from "../epub/source.ts";
 import { openPdf } from "../render.ts";
-import type { Job } from "./jobs.ts";
 import type { BatchTask } from "./batch-task.ts";
+import { planBatches } from "./batches.ts";
 import type { Book, BookKind } from "../store.ts";
 import type { Deps } from "./deps.ts";
 
@@ -27,12 +27,6 @@ async function exists(path: string): Promise<boolean> {
 	);
 }
 
-function chunk<T>(items: T[], size: number): T[][] {
-	const out: T[][] = [];
-	for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
-	return out;
-}
-
 /**
  * One book job: render every page to an image, read the unfinished pages in batches (child tasks, all at once; the
  * limiter paces them), pre-fill metadata from the title pages, then mark the book ready. Pausing aborts this task;
@@ -40,14 +34,6 @@ function chunk<T>(items: T[], size: number): T[][] {
  */
 export function createBookTask(deps: Deps, Batch: BatchTask) {
 	const { store } = deps;
-
-	/** Record a batch of the book task `owner` and create its task in `tx`. */
-	async function planBatch(tx: Tx, owner: TaskId, bookId: string, pages: number[], job: Job): Promise<TaskId> {
-		const batchId = store.createBatch(bookId, pages, job, owner);
-		const id = await tx.createTask(Batch, { bookId, batchId, pages, job }, { ownership: { kind: "task", taskId: owner } });
-		store.updateBatch(batchId, { taskId: id });
-		return id;
-	}
 
 	/** Render the book's PDF pages to images and create its page rows. False if aborted midway. */
 	async function renderPdf(book: Book, signal: AbortSignal): Promise<boolean> {
@@ -126,8 +112,8 @@ export function createBookTask(deps: Deps, Batch: BatchTask) {
 					const glossary = book.glossary === null && settings.stages.proofread.length > 0;
 					await runtime.commit(async (tx) => {
 						if (!glossary) return { status: "running", checkpoint: { phase: "translate", after: 0 } };
-						const id = await planBatch(tx, task.id, bookId, [], "glossary");
-						return { status: "waiting", checkpoint: { phase: "translate", after: 0 }, on: [id], policy: "allSettled" };
+						const on = await planBatches(tx, deps, Batch, { bookId, pages: [], job: "glossary", owner: task.id });
+						return { status: "waiting", checkpoint: { phase: "translate", after: 0 }, on, policy: "allSettled" };
 					}, context);
 					deps.changed(bookId);
 					return;
@@ -141,12 +127,8 @@ export function createBookTask(deps: Deps, Batch: BatchTask) {
 				store.deleteBatchesOf(task.id);
 				store.updateBook(bookId, { status: "running", error: null });
 				await runtime.commit(async (tx) => {
-					const ids: TaskId[] = [];
-					const plan = async (pages: number[], job: "pages" | "metadata") => {
-						ids.push(await planBatch(tx, task.id, bookId, pages, job));
-					};
-					for (const pages of chunk(todo, settings.pagesPerRequest)) await plan(pages, "pages");
-					if (needsMetadata) await plan(titlePages, "metadata");
+					const ids: TaskId[] = await planBatches(tx, deps, Batch, { bookId, pages: todo, job: "pages", owner: task.id });
+					if (needsMetadata) ids.push(...(await planBatches(tx, deps, Batch, { bookId, pages: titlePages, job: "metadata", owner: task.id })));
 					if (ids.length === 0) return { status: "running", checkpoint: { phase: "finish" } };
 					return { status: "waiting", checkpoint: { phase: "finish" }, on: ids, policy: "allSettled" };
 				}, context);
@@ -162,8 +144,8 @@ export function createBookTask(deps: Deps, Batch: BatchTask) {
 				const next = store.pages(bookId).find((p) => p.page > after && (p.status === "pending" || p.status === "failed"))?.page;
 				await runtime.commit(async (tx) => {
 					if (next === undefined) return { status: "running", checkpoint: { phase: "finish" } };
-					const id = await planBatch(tx, task.id, bookId, [next], "translate");
-					return { status: "waiting", checkpoint: { phase: "translate", after: next }, on: [id], policy: "allSettled" };
+					const on = await planBatches(tx, deps, Batch, { bookId, pages: [next], job: "translate", owner: task.id });
+					return { status: "waiting", checkpoint: { phase: "translate", after: next }, on, policy: "allSettled" };
 				}, context);
 				deps.changed(bookId);
 			},
