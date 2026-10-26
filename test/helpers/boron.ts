@@ -90,7 +90,7 @@ export async function startBoron(options: {
 	models: ReturnType<typeof createModels>;
 	dir?: string;
 	storage?: Storage;
-	tesseract?: (images: string[]) => Promise<string[]>;
+	tesseract?: (images: Buffer[]) => Promise<string[]>;
 }): Promise<TestBoron> {
 	const dir = options.dir ?? (await tempDir());
 	const store = openStore(join(dir, "boron.db"));

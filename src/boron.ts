@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import { createRegistry, Harness, type Storage, type TaskId } from "@earendil-works/pi-durable";
+import type { Deps } from "./pipeline/deps.ts";
 import { createLimiter } from "./pipeline/limiter.ts";
 import { createPipeline } from "./pipeline/index.ts";
 import type { Settings } from "./settings.ts";
@@ -16,7 +17,7 @@ export type BoronOptions = {
 	store: Store;
 	settings: () => Settings;
 	models: (settings: Settings) => Models;
-	tesseract: (images: string[]) => Promise<string[]>;
+	tesseract: Deps["tesseract"];
 	/** Directory of book files: `<booksDir>/<id>/source.pdf`, `pages/0001.jpg`, `cover.jpg`. */
 	booksDir: string;
 	now?: () => number;
