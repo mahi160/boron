@@ -4,7 +4,7 @@ import { strToU8, type Zippable, zipSync } from "fflate";
 import MarkdownIt from "markdown-it";
 import container from "markdown-it-container";
 import footnote from "markdown-it-footnote";
-import type { Chapter, FigureCrop, UsedTocEntry } from "./assemble.ts";
+import { BREAK_MARKER, type Chapter, type FigureCrop, type PageBreak, type UsedTocEntry } from "./assemble.ts";
 
 export type EpubInput = {
 	id: string;
@@ -14,6 +14,8 @@ export type EpubInput = {
 	year: string;
 	chapters: Chapter[];
 	toc: UsedTocEntry[];
+	/** Where each printed page starts, for pagebreak markers and the page list. */
+	pageBreaks: PageBreak[];
 	tocDepth: number;
 	cover: Buffer;
 	/** Cropped image of each figure the chapters reference. */
@@ -124,15 +126,27 @@ export async function writeEpub(book: EpubInput): Promise<Uint8Array> {
 	};
 	for (const font of FONTS) files[`OEBPS/${font.file}`] = await readFile(font.source);
 	for (const figure of book.figures) files[`OEBPS/${figure.crop.file}`] = figure.data;
+	const labels = new Map(book.pageBreaks.map((b) => [String(b.page), b.label]));
+	const pagebreak = (page: string) =>
+		`<span epub:type="pagebreak" role="doc-pagebreak" id="page-${page}" aria-label="${escape(labels.get(page) ?? "")}"></span>`;
 	chapters.forEach((chapter, i) => {
-		const body = md.render(chapter.markdown, {});
+		const body = md.render(chapter.markdown, {})
+			// A page start before a heading or list is its own paragraph; keep only the marker.
+			.replace(/<p>((?:\uE000\d+\uE001)+)<\/p>\n?/g, "$1")
+			.replace(BREAK_MARKER, (_, page: string) => pagebreak(page));
 		files[`OEBPS/${chapterFile(i)}`] = strToU8(
 			xhtml(chapter.title || title, `<section epub:type="chapter">\n${body}</section>`),
 		);
 	});
 	const nav = book.toc.length > 0 ? navList(book.toc, book.tocDepth) : `<ol><li><a href="${chapterFile(0)}">${escape(title)}</a></li></ol>`;
+	const pageList =
+		book.pageBreaks.length === 0
+			? ""
+			: `\n<nav epub:type="page-list" id="page-list" hidden="hidden"><h2>পৃষ্ঠা</h2><ol>${book.pageBreaks
+					.map((b) => `<li><a href="${chapterFile(b.chapter)}#page-${b.page}">${escape(b.label)}</a></li>`)
+					.join("")}</ol></nav>`;
 	files["OEBPS/nav.xhtml"] = strToU8(
-		xhtml(title, `<nav epub:type="toc" id="toc"><h1>সূচিপত্র</h1>\n${nav}\n</nav>`),
+		xhtml(title, `<nav epub:type="toc" id="toc"><h1>সূচিপত্র</h1>\n${nav}\n</nav>${pageList}`),
 	);
 
 	const manifest = [

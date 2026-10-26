@@ -14,6 +14,7 @@ const result = (page: number, markdown: string, extra: Partial<PageResult> = {})
 	headings: [],
 	figures: [],
 	runningHeader: "",
+	runningFooter: "",
 	printedPageNumber: "",
 	endsMidParagraph: false,
 	...extra,
@@ -29,6 +30,7 @@ const row = (page: number, raw: PageResult, extra: Partial<PageRow> = {}): PageR
 	figures: null,
 	engine: "test",
 	flag: null,
+	pageLabel: null,
 	...extra,
 });
 
@@ -100,6 +102,25 @@ describe("exportEpub", () => {
 		const ch2 = text("OEBPS/ch002.xhtml");
 		expect(ch2).toContain("সম্পাদিত <strong>লেখা</strong>।");
 		expect(text("OEBPS/nav.xhtml")).toContain('<a href="ch002.xhtml#h-3-0">দ্বিতীয় পরিচ্ছেদ</a>');
+	});
+
+	it("marks where each printed page starts and lists the pages in the nav", async () => {
+		const image = await pageImage(await tempDir());
+		const pages = [
+			row(1, result(1, "")),
+			row(2, result(2, "# \u0985\u09a7\u09cd\u09af\u09be\u09af\u09bc\n\n\u0995\u09a5\u09be", { endsMidParagraph: true })),
+			row(3, result(3, "\u099a\u09b2\u09bf\u09b2\u0964\n\n\u09e9", { printedPageNumber: "\u09e9" })),
+		];
+		const zip = unzipSync(await exportEpub({ book, pages, tocDepth: 2, figures: true, pageImage: () => image, uploadedCover: "" }));
+		const text = (name: string) => strFromU8(zip[name] ?? new Uint8Array());
+		const ch1 = text("OEBPS/ch001.xhtml");
+		// Page 2 is counted back from page 3; page 1 would be page 1 but has no text, so it marks the same spot.
+		expect(ch1).toContain('<span epub:type="pagebreak" role="doc-pagebreak" id="page-2" aria-label="\u09e8"></span><h1');
+		expect(ch1).toContain('\u0995\u09a5\u09be <span epub:type="pagebreak" role="doc-pagebreak" id="page-3" aria-label="\u09e9"></span>\u099a\u09b2\u09bf\u09b2\u0964</p>');
+		expect(ch1).not.toContain("<p>\u09e9</p>");
+		const nav = text("OEBPS/nav.xhtml");
+		expect(nav).toContain('<nav epub:type="page-list"');
+		expect(nav).toContain('<a href="ch001.xhtml#page-3">\u09e9</a>');
 	});
 
 	it("renders pipe tables", async () => {

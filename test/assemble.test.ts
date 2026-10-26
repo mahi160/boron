@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { assemble, type AssemblyPage, proposeToc } from "../src/epub/assemble.ts";
+import { assemble, type AssemblyPage, BREAK_MARKER, proposeToc } from "../src/epub/assemble.ts";
 
 const page = (n: number, markdown: string, extra: Partial<AssemblyPage> = {}): AssemblyPage => ({
 	page: n,
 	markdown,
 	runningHeader: "",
+	runningFooter: "",
 	printedPageNumber: "",
+	label: "",
 	endsMidParagraph: false,
 	figures: [],
 	...extra,
@@ -15,6 +17,43 @@ describe("assemble", () => {
 	it("strips a running header and page number the model left in the text", () => {
 		const { chapters } = assemble([page(1, "গোরা\n\nপ্রথম অনুচ্ছেদ।\n\n১০", { runningHeader: "গোরা", printedPageNumber: "১০" })], null);
 		expect(chapters[0]?.markdown.trim()).toBe("প্রথম অনুচ্ছেদ।");
+	});
+
+	it("strips a reported footer, a decorated page number and headers repeated on many pages", () => {
+		const { chapters } = assemble(
+			[
+				page(1, "\u0997\u09cb\u09b0\u09be \u09e7\u09e6\n\n\u098f\u0995\u0964\n\n\u2014 \u09e7\u09e6 \u2014", { label: "\u09e7\u09e6" }),
+				page(2, "\u0997\u09cb\u09b0\u09be \u09e7\u09e7\n\n\u09a6\u09c1\u0987\u0964\n\nscanned by example.org", { runningFooter: "scanned by example.org" }),
+				page(3, "\u0997\u09cb\u09b0\u09be  \u09e7\u09e8\n\n\u09a4\u09bf\u09a8\u0964"),
+			],
+			null,
+		);
+		// Page 1 has a label, so its text opens with a page-start marker.
+		expect(chapters[0]?.markdown.replace(BREAK_MARKER, "").trim()).toBe("\u098f\u0995\u0964\n\n\u09a6\u09c1\u0987\u0964\n\n\u09a4\u09bf\u09a8\u0964");
+	});
+
+	it("keeps a lone number that is not the page's number", () => {
+		const { chapters } = assemble([page(1, "\u09e8\n\n\u0995\u09a5\u09be", { label: "\u09e7\u09e6" })], null);
+		expect(chapters[0]?.markdown).toContain("\u09e8\n\n");
+	});
+
+	it("joins a paragraph across a page whose footnotes end it, and moves the notes to the chapter end", () => {
+		const { chapters } = assemble(
+			[page(1, "\u09ac\u09bf\u09a8\u09af\u09bc[^1] \u09ac\u09b2\u09bf\u09a4\u09c7\n\n[^1]: \u099f\u09c0\u0995\u09be\u0964", { endsMidParagraph: true }), page(2, "\u099a\u09c7\u09b7\u09cd\u099f\u09be \u0995\u09b0\u09bf\u09b2\u0964")],
+			null,
+		);
+		expect(chapters[0]?.markdown).toBe("\u09ac\u09bf\u09a8\u09af\u09bc[^p1-1] \u09ac\u09b2\u09bf\u09a4\u09c7 \u099a\u09c7\u09b7\u09cd\u099f\u09be \u0995\u09b0\u09bf\u09b2\u0964\n\n[^p1-1]: \u099f\u09c0\u0995\u09be\u0964\n\n");
+	});
+
+	it("keeps a footnote in its reference's chapter when a chapter starts lower on the page", () => {
+		const { chapters } = assemble([page(1, "# \u098f\u0995\n\n\u0995\u09a5\u09be[^1]\n\n# \u09a6\u09c1\u0987\n\n\u0986\u09b0\u0993\n\n[^1]: \u099f\u09c0\u0995\u09be")], null);
+		expect(chapters[0]?.markdown).toContain("[^p1-1]: \u099f\u09c0\u0995\u09be");
+		expect(chapters[1]?.markdown).not.toContain("[^p1-1]");
+	});
+
+	it("keeps short lines of dialogue that happen to open several pages", () => {
+		const pages = [1, 2, 3].map((n) => page(n, "\u09a8\u09be\u0964\n\n\u0995\u09a5\u09be"));
+		expect(assemble(pages, null).chapters[0]?.markdown.match(/\u09a8\u09be\u0964/g)).toHaveLength(3);
 	});
 
 	it("joins a paragraph split across a page break", () => {
