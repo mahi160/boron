@@ -4,13 +4,13 @@ import { createWorker, OEM, type Worker } from "tesseract.js";
 let worker: Promise<Worker> | undefined;
 
 /**
- * Offline OCR with Tesseract (WASM) and its Bangla model. The model is downloaded once into `cachePath`
- * (the Docker image ships it there already).
+ * Offline OCR with Tesseract (WASM) and its Bangla and English models, for pages that mix both scripts. The models
+ * are downloaded once into `cachePath` (the Docker image ships them there already).
  */
 export function createTesseract(cachePath: string) {
-	return async (images: string[]): Promise<string[]> => {
+	return async (images: Buffer[]): Promise<string[]> => {
 		worker ??= mkdir(cachePath, { recursive: true })
-			.then(() => createWorker("ben", OEM.LSTM_ONLY, { cachePath }))
+			.then(() => createWorker(["ben", "eng"], OEM.LSTM_ONLY, { cachePath }))
 			.catch((error: unknown) => {
 				// Try again next time (e.g. the model download failed while offline).
 				worker = undefined;

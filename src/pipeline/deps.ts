@@ -15,5 +15,5 @@ export type Deps = {
 	/** Path of a rendered page image. */
 	pageImage: (bookId: string, page: number) => string;
 	/** Offline OCR of page images, one text per image. */
-	tesseract: (images: string[]) => Promise<string[]>;
+	tesseract: (images: Buffer[]) => Promise<string[]>;
 };

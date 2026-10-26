@@ -13,6 +13,7 @@ export type PageResult = {
 	headings: Heading[];
 	figures: Figure[];
 	runningHeader: string;
+	runningFooter: string;
 	printedPageNumber: string;
 	endsMidParagraph: boolean;
 };
@@ -72,6 +73,7 @@ export function parsePageResults(text: string, requested: readonly number[]): Pa
 			headings: headings(item.headings),
 			figures: figures(item.figures),
 			runningHeader: str(item.runningHeader),
+			runningFooter: str(item.runningFooter),
 			printedPageNumber: str(item.printedPageNumber),
 			endsMidParagraph: item.endsMidParagraph === true,
 		});

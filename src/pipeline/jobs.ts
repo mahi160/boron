@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { UserInput } from "@earendil-works/pi-durable";
+import { cleanScan } from "../clean.ts";
 import { isObj, parseJson, unfence } from "../json.ts";
 import type { Settings, Stage } from "../settings.ts";
 import { type PageResult, parsePageResults } from "./contract.ts";
@@ -28,8 +29,14 @@ export function instructions(stage: Stage, settings: Settings): string {
 	return `${settings.prompts[stage]}\n\n${PAGE_CONTRACT}${figures}`;
 }
 
+/** The page image OCR reads: the rendered scan, cleaned of light marks when the setting is on. */
+export function ocrImage(deps: Deps, bookId: string, page: number): Promise<Buffer> {
+	const path = deps.pageImage(bookId, page);
+	return deps.settings().cleanScans ? cleanScan(path) : readFile(path);
+}
+
 async function image(deps: Deps, bookId: string, page: number) {
-	const data = await readFile(deps.pageImage(bookId, page));
+	const data = await ocrImage(deps, bookId, page);
 	return { type: "image" as const, data: data.toString("base64"), mimeType: "image/jpeg" };
 }
 

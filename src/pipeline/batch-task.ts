@@ -12,7 +12,7 @@ import type { ProviderConfig, Stage } from "../settings.ts";
 import type { PageResult } from "./contract.ts";
 import type { Deps } from "./deps.ts";
 import { classifyError, errorMessage } from "./errors.ts";
-import { instructions, type Job, jobStages, parseAnswer, requestContent } from "./jobs.ts";
+import { instructions, type Job, jobStages, ocrImage, parseAnswer, requestContent } from "./jobs.ts";
 import { resetBounds } from "./reset.ts";
 
 export type BatchInput = { bookId: string; batchId: number; pages: number[]; job: Job };
@@ -94,7 +94,7 @@ export function createBatchTask(deps: Deps) {
 	async function runTesseract(task: Task<"pick">, runtime: Runtime, context: Context) {
 		const { bookId, pages } = task.input;
 		setBatch(task, { state: "running", stage: "ocr", provider: "tesseract", wakeAt: null, note: null });
-		const texts = await deps.tesseract(pages.map((page) => deps.pageImage(bookId, page)));
+		const texts = await deps.tesseract(await Promise.all(pages.map((page) => ocrImage(deps, bookId, page))));
 		pages.forEach((page, i) => {
 			const result: PageResult = {
 				page,
@@ -102,6 +102,7 @@ export function createBatchTask(deps: Deps) {
 				headings: [],
 				figures: [],
 				runningHeader: "",
+				runningFooter: "",
 				printedPageNumber: "",
 				endsMidParagraph: false,
 			};
