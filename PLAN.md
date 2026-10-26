@@ -10,14 +10,17 @@ Self-hosted, single-user app. Upload a scanned PDF (Bangla first), OCR it with a
 | Orchestration | pi-durable, all-in: durable tasks + one conversation per batch-stage, task graph and agent events streamed to the UI | Checkpointed tasks, `sleepUntil`, child tasks, SQLite storage, `watch()`/`watchEvents()` |
 | Models | Any OpenAI-compatible provider via pi-ai (`createProvider({ baseUrl })`), plus pi-ai's native `google` provider | Gemini (`/v1beta/openai/` or native), Ollama, vLLM, LM Studio, OpenRouter |
 | Page rendering | pdf.js (`pdfjs-dist`) + `@napi-rs/canvas`, in-process | Cross-platform with no system binaries (replaces `pdftoppm`); page 20 of Gora at 2000 px long side renders in ~170 ms |
-| OCR engine | Vision LLM. Tesseract `ben` bundled as an offline fallback only | OXR tested on a real Bangla scan (Gora p.10): garbage output + repetition loop, 83 s; free API also returned a 520. Tesseract is weak on conjuncts |
+| OCR engine | Vision LLM. Tesseract `ben` (tesseract.js, WASM; model shipped in the image) as an offline fallback only | OXR tested on a real Bangla scan (Gora p.10): garbage output + repetition loop, 83 s; free API also returned a 520. Tesseract is weak on conjuncts |
 | Stages | Two passes: OCR (image → text), then proofread (image + OCR text → corrected text). Each stage has its own provider list | Raw vs proofread diff kept for review |
 | Proofread policy | Fix OCR errors only. Preserve the author's spelling, sadhu bhasha, and punctuation exactly | Old books (e.g. বড়ো, দিলুম) must not be modernized |
 | Batch | N pages per model request (default 3) + concurrency, RPM, RPD knobs | Free tier is mostly limited by requests/day; adjacent pages give context for paragraphs crossing page breaks |
 | Rate limits | One global limiter shared by all books. Ordered provider list per stage; on 429/quota move to the next; when all are exhausted, durable sleep until reset (default midnight PT, configurable), countdown in UI | Gemini limits are per project, unpublished, read from AI Studio → knobs |
 | Fidelity | Headings/chapters, bold/italic, footnotes, tables, verse layout, cropped illustrations. Running headers and page numbers stripped | |
 | Figures | Vision LLM returns bounding boxes; server crops; boxes adjustable in review UI | |
-| Chapters/TOC | Pages tag headings; a final cheap assembly pass builds the TOC; user edits it | |
+| Chapters/TOC | Pages tag headings; the assembly step proposes the TOC from them (no model call); user renames, re-levels, merges (level 0) and splits | A model pass adds a request per book for little gain over the tagged headings |
+| EPUB | Pure JS: markdown-it (+ footnote, container) → XHTML, zipped with fflate; Noto Serif Bengali embedded | Cross-platform, no pandoc binary |
+| App data | `node:sqlite` (`/data/boron.db`: books, pages, batches, limiter log); pi-durable in `/data/durable.sqlite` | Pages and edits are queried by the UI; tasks stay pi-durable's |
+| Job control | Pause/abort = abort the book task (its batches abort with it); resume = a new book task that skips finished pages | Finished pages are already committed to the app DB |
 | Metadata | Title/author pre-filled by the LLM from the title page, cover = page 1 render, all editable | |
 | Review | Optional review UI: page image vs text side-by-side, editable, raw/proofread diff | |
 | Users | Single user, no auth, library of books, global job queue | |
@@ -27,14 +30,14 @@ Self-hosted, single-user app. Upload a scanned PDF (Bangla first), OCR it with a
 ## Architecture
 
 ```
-React SPA ──HTTP/SSE──> Hono API ──> Harness (pi-durable, SQLite /data/boron.sqlite)
-                                      ├─ boron.book task (per book)
-                                      │   ├─ render → plan → batches → assemble → epub
+React SPA ──HTTP/SSE──> Hono API ──> Harness (pi-durable, SQLite /data/durable.sqlite)
+                                      ├─ boron.book task (per book): render → plan → finish
                                       │   └─ boron.batch tasks (children, gated by limiter)
-                                      │        └─ child conversation per stage (ocr | proofread)
+                                      │        └─ child conversation per stage (ocr | proofread | metadata)
                                       └─ models: pi-ai providers from settings
-Files: /data/books/<bookId>/{source.pdf, pages/0001.png, figures/*.png, out/book.epub}
-Tools in image: tesseract-ocr + ben, pandoc, Noto Serif/Sans Bengali
+App data: /data/boron.db; settings: /data/settings.json
+Files: /data/books/<bookId>/{source.pdf, pages/0001.jpg, cover.jpg}
+EPUB and figure crops are built on download from the current pages, edits and TOC.
 ```
 
 ### Pipeline (one `boron.book` task, phases checkpointed)
@@ -47,7 +50,7 @@ Tools in image: tesseract-ocr + ben, pandoc, Noto Serif/Sans Bengali
    - Parse strict JSON output; on 429/quota mark that provider exhausted until reset and fail over; if the list is exhausted, sleep until reset.
    - Commit the page results to the book's documents.
 4. **assemble**: join paragraphs across page breaks (`endsMidParagraph`), drop running headers/page numbers, crop figures, run the TOC pass, pre-fill metadata.
-5. **epub**: write Pandoc Markdown + metadata YAML + CSS → `pandoc -t epub3 --epub-embed-font ... --toc`, `lang: bn`.
+5. **epub** (on download): markdown-it renders each chapter to XHTML; the OPF, nav, cover, crops and the embedded font are zipped as EPUB3, `lang: bn`.
 
 Re-running a single page or batch after a review edit or a setting change = a new `boron.batch` task for just those pages.
 
@@ -63,12 +66,12 @@ Markdown conventions (Pandoc): `#` headings, `**`/`*`, `[^n]` footnotes, pipe/gr
 
 ## Knobs (settings UI, live: read at every use)
 
-- Per stage (ocr, proofread, assemble): ordered provider list `{provider, baseUrl, apiKey, model, rpm, rpd, tpm, concurrency, temperature}`
-- Pages per request, render DPI, image max side / JPEG quality
+- Providers `{name, kind: gemini | openai, baseUrl, apiKey, model, rpm, rpd, concurrency}`; per stage (ocr, proofread, assemble = title page metadata) an ordered list of them. No temperature: the Google API ignores sampling params
+- Pages per request, image max side / JPEG quality
 - Quota reset time + timezone (default 00:00 America/Los_Angeles)
 - Proofread on/off; Tesseract fallback on/off; figure detection on/off
-- Prompts (OCR, proofread, TOC) editable, with versioned defaults
-- EPUB: font, CSS, TOC depth, include page-number anchors
+- Prompts (OCR, proofread, metadata) editable; the JSON output contract is appended by code
+- EPUB: TOC depth
 
 ## UI screens
 
@@ -87,7 +90,7 @@ Markdown conventions (Pandoc): `#` headings, `**`/`*`, `[^n]` footnotes, pipe/gr
 
 ## Spike findings (#01, 2026-10-26)
 
-Code: `src/ocr-task.ts` (task `boron.ocrPage`), `src/render.ts`, `scripts/spike-ocr.ts` (`pnpm spike [pdf] [page]`, key in `.env`). Tests: `test/`.
+Code (since replaced by the pipeline in `src/pipeline/`; see git history at `12c4f37`): `src/ocr-task.ts` (task `boron.ocrPage`), `src/render.ts`, `scripts/spike-ocr.ts`, `test/crash-resume.test.ts`, `test/gemini-errors.test.ts`.
 
 **Pinned exactly:** `@earendil-works/pi-durable` 1.4.0, `@earendil-works/pi-ai` 1.4.0, `@earendil-works/chord` 1.4.0, `pdfjs-dist` 5.4.149, `@napi-rs/canvas` 0.1.80.
 
@@ -118,6 +121,14 @@ Code: `src/ocr-task.ts` (task `boron.ocrPage`), `src/render.ts`, `scripts/spike-
 **Not tested:** how app documents scale to ~600 pages (Risk 1). The only data point is the transcript size: entries of 1.0 to 1.2 MB per page image in `data/spike.sqlite`.
 
 **Usage:** `harness.usage()` reports tokens and cost per `provider/model`, so the UI can show spend without extra bookkeeping.
+
+## Build findings (tickets 03–17, 2026-10-26)
+
+- **Blank pages:** asked for two pages where the second was blank, `gemini-3.5-flash` returned only the first, three times, so both pages were flagged. The output contract now asks for one object per image, blank pages included; with it the same pair passed on the first try.
+- **Request time:** `gemini-3.5-flash` took 27–58 s per 2–3 page request, with 2.8k–4.6k reasoning tokens of 3.3k–5.3k output tokens.
+- **Errors shown to the user:** the nested Gemini error string is reduced to `<code>: <message>` (`errorMessage` in `src/pipeline/errors.ts`) before it is shown on a batch.
+- **Restart coverage:** `test/pipeline.test.ts` closes and reopens the harness mid-request (graceful). The SIGKILL test from the spike is gone with the spike code.
+- **Tesseract (tesseract.js 7, `ben`):** ~1.5 s per page; reads the plain text but confuses vowel signs (`লিথিয়!` for `লিখিয়া`), so its pages are flagged to check when it stands in for a model.
 
 ## Milestones
 

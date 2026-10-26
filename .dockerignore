@@ -1,0 +1,8 @@
+node_modules
+dist
+data
+samples
+.env
+.git
+.scratch
+*.sqlite*

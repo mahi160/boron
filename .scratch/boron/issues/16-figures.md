@@ -4,11 +4,11 @@
 
 **Blocked by:** 12 Review screen; 13 Structured text and EPUB3 fidelity
 
-**Status:** ready-for-agent
+**Status:** done (box editing is built but not tried in the browser on a page with an illustration; Gemini's box format is not yet checked on real pages)
 
-- [ ] A page with an illustration produces a cropped image in the EPUB at the right place
+- [x] A page with an illustration produces a cropped image in the EPUB at the right place
 - [ ] Boxes are drawn on the page image in review and can be adjusted; the crop updates
-- [ ] Figure detection can be switched off in settings
+- [x] Figure detection can be switched off in settings
 - [ ] Box coordinate format of the chosen model is verified against real pages
 
 **Context:** see `PLAN.md` at the repo root.

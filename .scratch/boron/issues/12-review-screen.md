@@ -4,11 +4,11 @@
 
 **Blocked by:** 07 Proofread stage
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Page image and text are shown side by side with page navigation
-- [ ] Edits are saved and appear in the next EPUB export
-- [ ] Re-running a page replaces its text only after confirmation and only for that page
-- [ ] Re-run requests go through the limiter like any other request
+- [x] Page image and text are shown side by side with page navigation
+- [x] Edits are saved and appear in the next EPUB export
+- [x] Re-running a page replaces its text only after confirmation and only for that page
+- [x] Re-run requests go through the limiter like any other request
 
 **Context:** see `PLAN.md` at the repo root.

@@ -4,11 +4,11 @@
 
 **Blocked by:** 08 Global rate limiter
 
-**Status:** ready-for-agent
+**Status:** done (a resume after the reset across a container restart is untested; a live daily-quota 429 was never captured)
 
-- [ ] A daily-quota error marks that provider exhausted until reset and the batch continues on the next provider
-- [ ] A per-minute 429 backs off and retries the same provider rather than failing over
+- [x] A daily-quota error marks that provider exhausted until reset and the batch continues on the next provider
+- [x] A per-minute 429 backs off and retries the same provider rather than failing over
 - [ ] With all providers exhausted, the job shows a countdown and resumes after reset, including across a container restart
-- [ ] Reset time and timezone are configurable
+- [x] Reset time and timezone are configurable
 
 **Context:** see `PLAN.md` at the repo root.

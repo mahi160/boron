@@ -1,0 +1,23 @@
+# Boron: one image with the server, the web UI and Tesseract's Bangla model. Everything else lives in /data.
+FROM node:24-slim AS build
+WORKDIR /app
+RUN corepack enable
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm build && pnpm prune --prod
+# Fetch Tesseract's Bangla model once, at build time.
+RUN mkdir -p tessdata && node --input-type=module -e "import { createWorker } from 'tesseract.js'; const w = await createWorker('ben', 1, { cachePath: '/app/tessdata' }); await w.terminate();"
+
+FROM node:24-slim
+WORKDIR /app
+ENV NODE_ENV=production BORON_DATA_DIR=/data BORON_TESSDATA=/app/tessdata PORT=3000
+COPY --from=build /app/package.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/src ./src
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/tessdata ./tessdata
+VOLUME /data
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD node -e "fetch('http://localhost:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+CMD ["node", "src/main.ts"]

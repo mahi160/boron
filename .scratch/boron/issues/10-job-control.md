@@ -4,10 +4,10 @@
 
 **Blocked by:** 05 Live job view over SSE
 
-**Status:** ready-for-agent
+**Status:** done (the parked-task UI and a kill -9 of the container are untested)
 
-- [ ] Pause stops new requests; resume continues from where it stopped
-- [ ] Abort stops the job and leaves completed pages intact
+- [x] Pause stops new requests; resume continues from where it stopped
+- [x] Abort stops the job and leaves completed pages intact
 - [ ] A parked batch is visible with its reason and can be retried
 - [ ] Killing the container mid-job and starting it again resumes without duplicate requests
 

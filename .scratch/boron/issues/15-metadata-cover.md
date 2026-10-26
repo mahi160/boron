@@ -4,10 +4,10 @@
 
 **Blocked by:** 13 Structured text and EPUB3 fidelity
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Title and author are pre-filled for a book with a title page
-- [ ] Cover defaults to page 1 and can be changed to another page or an uploaded image
-- [ ] EPUB metadata (title, author, language bn, cover) matches what the user saved
+- [x] Title and author are pre-filled for a book with a title page
+- [x] Cover defaults to page 1 and can be changed to another page or an uploaded image
+- [x] EPUB metadata (title, author, language bn, cover) matches what the user saved
 
 **Context:** see `PLAN.md` at the repo root.

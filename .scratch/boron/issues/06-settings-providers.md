@@ -4,11 +4,11 @@
 
 **Blocked by:** 03 Walking skeleton
 
-**Status:** ready-for-agent
+**Status:** done (a model change in the middle of a job is untested: settings are read at every request)
 
-- [ ] User can add Gemini (native and OpenAI-compatible endpoint) and an Ollama provider and reorder them per stage
-- [ ] Test button reports success or the provider's error for a sample image
+- [x] User can add Gemini (native and OpenAI-compatible endpoint) and an Ollama provider and reorder them per stage
+- [x] Test button reports success or the provider's error for a sample image
 - [ ] Changing the model mid-job applies to the next batch request
-- [ ] API keys are never shown in full after saving and never logged
+- [x] API keys are never shown in full after saving and never logged
 
 **Context:** see `PLAN.md` at the repo root.

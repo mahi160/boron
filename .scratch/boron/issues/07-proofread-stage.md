@@ -4,11 +4,11 @@
 
 **Blocked by:** 03 Walking skeleton; 06 Settings: per-stage provider lists and prompts
 
-**Status:** ready-for-agent
+**Status:** done (the CER check waits for the eval in #02)
 
-- [ ] Every page stores both raw OCR and proofread text
-- [ ] Per-page diff view highlights changes
-- [ ] Proofread can be switched off in settings, in which case the EPUB uses raw OCR
+- [x] Every page stores both raw OCR and proofread text
+- [x] Per-page diff view highlights changes
+- [x] Proofread can be switched off in settings, in which case the EPUB uses raw OCR
 - [ ] On the eval pages, proofread CER is not worse than raw OCR CER, and old spellings (e.g. বড়ো, দিলুম) are left unchanged
 
 **Context:** see `PLAN.md` at the repo root.

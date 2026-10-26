@@ -4,10 +4,10 @@
 
 **Blocked by:** 13 Structured text and EPUB3 fidelity
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] After a job completes, a proposed chapter list is shown
-- [ ] User edits to chapters are reflected in the EPUB's navigation and chapter files
-- [ ] TOC depth is configurable
+- [x] After a job completes, a proposed chapter list is shown
+- [x] User edits to chapters are reflected in the EPUB's navigation and chapter files
+- [x] TOC depth is configurable
 
 **Context:** see `PLAN.md` at the repo root.

@@ -1,0 +1,76 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource/noto-serif-bengali/bengali-400.css";
+@import "@fontsource/noto-serif-bengali/bengali-700.css";
+
+/* Style: achromatic-ledger. No colour in the chrome; one hue (--color-data) on the main data element only. */
+@theme {
+	--font-sans: "Geist Variable", system-ui, sans-serif;
+	--font-bangla: "Noto Serif Bengali", "Geist Variable", serif;
+
+	--color-ground: #f9f9f9;
+	--color-surface: #ffffff;
+	--color-raised: #f4f4f4;
+	--color-active: #e9e9e9;
+	--color-border: #e8e8e8;
+	--color-rule: #f1f1f1;
+	--color-control: #d1d5db;
+	--color-ink: #111111;
+	--color-muted: #5f6368;
+	--color-faint: #6b6b6b;
+	--color-primary: #1d1f20;
+	--color-secondary: #e5e5e5;
+	--color-data: #1d5fbf;
+	--color-negative: #c4242a;
+
+	--color-pos-bg: #dcfae5;
+	--color-pos-ink: #04250e;
+	--color-neg-bg: #ffedea;
+	--color-neg-ink: #831c1e;
+	--color-warn-bg: #fffbeb;
+	--color-warn-ink: #92400e;
+	--color-neutral-bg: #eeeeee;
+	--color-neutral-ink: #3d3d3d;
+}
+
+@layer base {
+	body {
+		@apply bg-ground text-ink font-sans text-sm antialiased;
+	}
+	:focus-visible {
+		outline: 2px solid var(--color-data);
+		outline-offset: 2px;
+	}
+	input,
+	select,
+	textarea {
+		@apply rounded-md border border-border bg-surface px-3 text-sm;
+	}
+	input:not([type="checkbox"]),
+	select {
+		@apply h-9;
+	}
+	input:user-invalid,
+	textarea:user-invalid {
+		@apply border-negative;
+	}
+	textarea {
+		@apply py-2;
+	}
+	dialog::backdrop {
+		background: rgb(0 0 0 / 0.35);
+	}
+}
+
+/* Bangla text: the author's own text, in a face that renders conjuncts correctly. */
+.bangla {
+	font-family: var(--font-bangla);
+	line-height: 1.9;
+}
+
+.drag-handle {
+	cursor: grab;
+	touch-action: none;
+	-webkit-user-select: none;
+	user-select: none;
+}

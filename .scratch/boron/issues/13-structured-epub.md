@@ -4,11 +4,11 @@
 
 **Blocked by:** 03 Walking skeleton
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Running headers and page numbers do not appear in the EPUB body
-- [ ] A paragraph split across a page break appears as one paragraph
-- [ ] Footnotes, tables, bold/italic, and poems (line breaks preserved) render correctly in the EPUB
-- [ ] Invalid model output for a page is retried, then flagged for review instead of breaking the book
+- [x] Running headers and page numbers do not appear in the EPUB body
+- [x] A paragraph split across a page break appears as one paragraph
+- [x] Footnotes, tables, bold/italic, and poems (line breaks preserved) render correctly in the EPUB
+- [x] Invalid model output for a page is retried, then flagged for review instead of breaking the book
 
 **Context:** see `PLAN.md` at the repo root.

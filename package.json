@@ -4,9 +4,12 @@
   "private": true,
   "description": "Bangla scanned PDF to proofread EPUB",
   "scripts": {
-    "spike": "node --env-file-if-exists=.env scripts/spike-ocr.ts",
+    "start": "node --env-file-if-exists=.env src/main.ts",
+    "dev": "node --env-file-if-exists=.env --watch src/main.ts",
+    "dev:web": "vite",
+    "build": "vite build",
     "test": "vitest run",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p . && tsc -p web"
   },
   "devEngines": {
     "packageManager": {
@@ -21,12 +24,30 @@
     "@earendil-works/chord": "1.4.0",
     "@earendil-works/pi-ai": "1.4.0",
     "@earendil-works/pi-durable": "1.4.0",
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource/noto-serif-bengali": "5.3.0",
+    "@hono/node-server": "2.1.5",
     "@napi-rs/canvas": "0.1.80",
-    "pdfjs-dist": "5.4.149"
+    "diff": "9.0.0",
+    "fflate": "0.8.3",
+    "hono": "4.13.13",
+    "markdown-it": "15.0.3",
+    "markdown-it-container": "4.0.0",
+    "markdown-it-footnote": "4.0.0",
+    "pdfjs-dist": "5.4.149",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
     "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
+    "vite": "8.3.5",
     "vitest": "5.0.5"
   }
 }

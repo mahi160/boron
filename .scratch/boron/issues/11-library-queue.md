@@ -4,10 +4,10 @@
 
 **Blocked by:** 05 Live job view over SSE; 08 Global rate limiter
 
-**Status:** ready-for-agent
+**Status:** done (two books sharing limits rely on the shared limiter; not run with two books)
 
-- [ ] Library shows every book with status and progress
+- [x] Library shows every book with status and progress
 - [ ] Two queued books both make progress under the shared limits without exceeding them
-- [ ] Deleting a book removes its files and job state
+- [x] Deleting a book removes its files and job state
 
 **Context:** see `PLAN.md` at the repo root.

@@ -4,11 +4,11 @@
 
 **Blocked by:** 06 Settings: per-stage provider lists and prompts
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] With RPM set to 2, no more than 2 requests per minute are sent to that provider
-- [ ] With RPD reached, no further requests go to that provider until its reset
-- [ ] Limiter counts survive a restart
-- [ ] Waiting batches show as sleeping with their wake time in the job view
+- [x] With RPM set to 2, no more than 2 requests per minute are sent to that provider
+- [x] With RPD reached, no further requests go to that provider until its reset
+- [x] Limiter counts survive a restart
+- [x] Waiting batches show as sleeping with their wake time in the job view
 
 **Context:** see `PLAN.md` at the repo root.

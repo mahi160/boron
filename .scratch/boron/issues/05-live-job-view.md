@@ -4,10 +4,10 @@
 
 **Blocked by:** 03 Walking skeleton
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Batch states change in the UI without reload as the job progresses
-- [ ] Retries/backoff and token usage per job are visible
-- [ ] Reconnecting or opening the page mid-job shows the current state
+- [x] Batch states change in the UI without reload as the job progresses
+- [x] Retries/backoff and token usage per job are visible
+- [x] Reconnecting or opening the page mid-job shows the current state
 
 **Context:** see `PLAN.md` at the repo root.

@@ -4,10 +4,10 @@
 
 **Blocked by:** 06 Settings: per-stage provider lists and prompts; 09 Provider failover and quota sleep
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] With no providers configured, a book still produces an EPUB via Tesseract
-- [ ] As the last OCR fallback, Tesseract handles batches only when all model providers are exhausted and the setting allows it
-- [ ] Tesseract-processed pages are labelled in the review screen and can be re-run with a model
+- [x] With no providers configured, a book still produces an EPUB via Tesseract
+- [x] As the last OCR fallback, Tesseract handles batches only when all model providers are exhausted and the setting allows it
+- [x] Tesseract-processed pages are labelled in the review screen and can be re-run with a model
 
 **Context:** see `PLAN.md` at the repo root.

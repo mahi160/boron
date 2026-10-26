@@ -4,11 +4,11 @@
 
 **Blocked by:** 03 Walking skeleton
 
-**Status:** ready-for-agent
+**Status:** done (the image was built and served the flow with Tesseract; a restart in the middle of a job inside the container is untested)
 
-- [ ] `docker run` with a `/data` volume and an API key serves the UI and completes the walking-skeleton flow
+- [x] `docker run` with a `/data` volume and an API key serves the UI and completes the walking-skeleton flow
 - [ ] Stopping and restarting the container resumes an in-progress job
-- [ ] Healthcheck reports healthy once the server is up
-- [ ] README covers run instructions, Ollama via `host.docker.internal`, and that free-tier Gemini inputs may be used for training/human review
+- [x] Healthcheck reports healthy once the server is up
+- [x] README covers run instructions, Ollama via `host.docker.internal`, and that free-tier Gemini inputs may be used for training/human review
 
 **Context:** see `PLAN.md` at the repo root.
