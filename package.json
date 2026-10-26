@@ -1,0 +1,32 @@
+{
+  "name": "boron",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Bangla scanned PDF to proofread EPUB",
+  "scripts": {
+    "spike": "node --env-file-if-exists=.env scripts/spike-ocr.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p ."
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.15.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.15.0",
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/chord": "1.4.0",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-durable": "1.4.0",
+    "@napi-rs/canvas": "0.1.80",
+    "pdfjs-dist": "5.4.149"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2",
+    "vitest": "5.0.5"
+  }
+}
