@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Figure, PageResult } from "../../src/pipeline/contract.ts";
+import type { PageLabel } from "../../src/page-labels.ts";
 import type { ProviderTestResult } from "../../src/provider-test.ts";
 import type { ProviderConfig, Settings } from "../../src/settings.ts";
 import type { BatchRow, Book, Cover, PageRow, PageStatus, PageSummary, Parked, TocEntry } from "../../src/store.ts";
 
-export type { BatchRow, Book, Cover, Figure, PageResult, PageRow, PageStatus, PageSummary, Parked, ProviderConfig, ProviderTestResult, Settings, TocEntry };
+export type { BatchRow, Book, Cover, Figure, PageLabel, PageResult, PageRow, PageStatus, PageSummary, Parked, ProviderConfig, ProviderTestResult, Settings, TocEntry };
 
 /** A book as the library lists it (`libraryEntry` on the server). */
 export type LibraryBook = Book & {
@@ -18,7 +19,8 @@ export type LibraryBook = Book & {
 
 export type BookDetail = {
 	book: LibraryBook;
-	pages: PageSummary[];
+	/** `label`: the page's printed label (`pageLabels` on the server), null if it has none. */
+	pages: (PageSummary & { label: PageLabel | null })[];
 	batches: BatchRow[];
 	parked: Parked[];
 	exhausted: { provider: string; name: string; until: number }[];

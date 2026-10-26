@@ -95,7 +95,7 @@ export function BookScreen({ route }: { route: BookRoute }) {
 			</div>
 
 			{route.tab === "job" && <Job detail={data} reload={reload} />}
-			{route.tab === "review" && <Review detail={data} page={Math.min(route.page, book.pageCount)} />}
+			{route.tab === "review" && <Review detail={data} reload={reload} page={Math.min(route.page, book.pageCount)} />}
 			{route.tab === "structure" && <Structure book={book} />}
 			{route.tab === "details" && <Details book={book} reload={reload} />}
 

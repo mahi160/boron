@@ -9,8 +9,9 @@ import { Button, Card, Confirm, ErrorLine, useAction } from "../ui.tsx";
 
 type View = "edit" | "changes";
 
-export function Review({ detail, page }: { detail: BookDetail; page: number }) {
+export function Review({ detail, page, reload }: { detail: BookDetail; page: number; reload: () => Promise<void> }) {
 	const { book, pages, batches } = detail;
+	const summary = pages.find((p) => p.page === page);
 	const { data: row, error } = useLive<PageRow>(`/books/${book.id}/pages/${page}`, book.id);
 	const to = (p: number) => go({ screen: "book", id: book.id, tab: "review", page: p });
 	const toCheck = pages.filter((p) => p.status === "flagged" || p.status === "failed").map((p) => p.page);
@@ -48,6 +49,7 @@ export function Review({ detail, page }: { detail: BookDetail; page: number }) {
 					/>
 					<span className="tabular-nums">of {book.pageCount}</span>
 				</label>
+				{summary !== undefined && <PrintedLabel key={`${page}:${summary.label?.label}:${summary.pageLabel}`} bookId={book.id} summary={summary} reload={reload} />}
 				<Button disabled={page >= book.pageCount} onClick={() => to(page + 1)} aria-label="Next page (Alt+→)">
 					→
 				</Button>
@@ -60,8 +62,44 @@ export function Review({ detail, page }: { detail: BookDetail; page: number }) {
 			{row === undefined ? (
 				error === null ? <p className="text-faint">Loading page…</p> : <ErrorLine>{error}</ErrorLine>
 			) : (
-				<PageEditor key={`${book.id}:${page}`} bookId={book.id} row={row} batchPages={batches.findLast((b) => b.job === "pages" && b.pages.includes(page))?.pages ?? [page]} />
+				<PageEditor key={`${book.id}:${page}`} bookId={book.id} row={row} printed={summary?.label?.label ?? ""} batchPages={batches.findLast((b) => b.job === "pages" && b.pages.includes(page))?.pages ?? [page]} />
 			)}
+		</div>
+	);
+}
+
+const LABEL_SOURCE = { printed: "read from the page", inferred: "counted from nearby pages", edited: "set by you" } as const;
+
+/** The printed page number of a PDF page; Enter or leaving the field saves it, empty means the page has none. */
+function PrintedLabel({ bookId, summary, reload }: { bookId: string; summary: BookDetail["pages"][number]; reload: () => Promise<void> }) {
+	const current = summary.label?.label ?? "";
+	const [value, setValue] = useState(current);
+	const save = useAction();
+	const put = (label: string | null) => save.run(() => api.put(`/books/${bookId}/pages/${summary.page}/label`, { label }).then(reload));
+	const commit = () => {
+		if (value.trim() !== current) void put(value.trim());
+	};
+	return (
+		<div className="flex items-center gap-2 text-muted">
+			<label className="flex items-center gap-2">
+				Printed page
+				<input
+					value={value}
+					maxLength={20}
+					placeholder="none"
+					className="bangla w-20 tabular-nums"
+					onChange={(e) => setValue(e.target.value)}
+					onBlur={commit}
+					onKeyDown={(e) => e.key === "Enter" && commit()}
+				/>
+			</label>
+			{summary.label !== null && <span className="text-xs text-faint">{LABEL_SOURCE[summary.label.source]}</span>}
+			{summary.pageLabel !== null && (
+				<Button variant="ghost" disabled={save.busy} onClick={() => void put(null)}>
+					Use detected
+				</Button>
+			)}
+			<ErrorLine>{save.error}</ErrorLine>
 		</div>
 	);
 }
@@ -70,7 +108,7 @@ export function Review({ detail, page }: { detail: BookDetail; page: number }) {
 const modelText = (row: PageRow) => (row.proofread ?? row.raw)?.markdown ?? "";
 const modelFigures = (row: PageRow): Figure[] => row.figures ?? (row.proofread ?? row.raw)?.figures ?? [];
 
-function PageEditor({ bookId, row, batchPages }: { bookId: string; row: PageRow; batchPages: number[] }) {
+function PageEditor({ bookId, row, printed, batchPages }: { bookId: string; row: PageRow; printed: string; batchPages: number[] }) {
 	const saved = row.edited ?? modelText(row);
 	const [draft, setDraft] = useState(saved);
 	const [view, setView] = useState<View>("edit");
@@ -100,7 +138,7 @@ function PageEditor({ bookId, row, batchPages }: { bookId: string; row: PageRow;
 	return (
 		<div className="grid items-start gap-4 lg:grid-cols-2">
 			<Card
-				title={`Scan of page ${row.page}`}
+				title={printed === "" ? `Scan of page ${row.page}` : `Scan of page ${row.page} (printed ${printed})`}
 				aside={
 					<div className="flex gap-2">
 						<Button

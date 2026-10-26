@@ -133,6 +133,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
 				<div className="mt-5 flex flex-col divide-y divide-rule rounded-lg border border-border bg-surface">
 					<SwitchRow label="Proofread" description="A second pass corrects OCR errors against the image." checked={s.proofread} onChange={(v) => set("proofread", v)} />
 					<SwitchRow label="Illustrations" description="Find pictures on each page and put them in the EPUB." checked={s.figures} onChange={(v) => set("figures", v)} />
+					<SwitchRow label="Clean scans" description="Whiten faint watermarks, show-through and paper tone in the images sent for reading. The stored scans and illustrations keep their colour." checked={s.cleanScans} onChange={(v) => set("cleanScans", v)} />
 					<SwitchRow label="Tesseract when out of quota" description="Read pages offline instead of waiting for the quota to reset. Lower quality; such pages are marked to check." checked={s.tesseractFallback} onChange={(v) => set("tesseractFallback", v)} />
 				</div>
 			</Section>
