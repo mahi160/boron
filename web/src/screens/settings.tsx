@@ -21,7 +21,7 @@ const PROMPTS: { key: keyof Settings["prompts"]; label: string }[] = [
 const PRESETS: { label: string; make: () => Omit<ProviderConfig, "id"> }[] = [
 	{
 		label: "Gemini",
-		make: () => ({ name: "Gemini", kind: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", apiKey: "", model: "gemini-flash-lite-latest", rpm: 10, rpd: 250, concurrency: 2, priceIn: null, priceOut: null }),
+		make: () => ({ name: "Gemini", kind: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "", model: "gemini-flash-lite-latest", rpm: 10, rpd: 250, concurrency: 2, priceIn: null, priceOut: null }),
 	},
 	{
 		label: "Claude (pi login)",
@@ -261,7 +261,7 @@ function ProviderCard({ provider: p, onChange, onRemove }: { provider: ProviderC
 		<div className="rounded-lg border border-border bg-surface">
 			<div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-2.5">
 				<input aria-label="Provider name" value={p.name} onChange={(e) => field("name", e.target.value)} className="h-8 border-transparent px-1 font-medium hover:border-border" />
-				<span className="text-xs text-faint">{p.kind === "gemini" ? "Gemini API" : p.kind === "pi" ? "Claude, signed in through pi" : "OpenAI-compatible"}</span>
+				<span className="text-xs text-faint">{p.kind === "pi" ? "Claude, signed in through pi" : "OpenAI-compatible"}</span>
 			</div>
 			<div className="grid gap-4 p-4 sm:grid-cols-2">
 				{p.kind !== "pi" && <Field label="Base URL">{(id) => <input id={id} type="url" required value={p.baseUrl} onChange={(e) => field("baseUrl", e.target.value)} />}</Field>}

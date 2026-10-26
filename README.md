@@ -29,7 +29,7 @@ Open http://localhost:3000.
 
 - **Data.** Everything is stored in the `/data` volume: books, page images, settings and job state. Stop and start the container freely; a job that was running continues where it stopped.
 - **Health.** The container's health check calls `GET /api/health`.
-- **Providers.** `GEMINI_API_KEY` only seeds the first-run settings with a Gemini provider. Providers, keys, limits and prompts are edited on the Settings screen afterwards, and changes apply to the next request without a restart. Keys are stored in `/data/settings.json` and are never shown again in full.
+- **Providers.** `GEMINI_API_KEY` only seeds the first-run settings with a Gemini provider, which talks to Gemini's OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai`). Every manually added provider is OpenAI-compatible; Gemini providers saved by older versions load as one automatically, keeping their key, model, limits and stage order. Providers, keys, limits and prompts are edited on the Settings screen afterwards, and changes apply to the next request without a restart. Keys are stored in `/data/settings.json` and are never shown again in full.
 
 ### Claude through pi
 

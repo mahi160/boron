@@ -1,6 +1,5 @@
 import { createModels, createProvider, type Model, type Models } from "@earendil-works/pi-ai";
 import { anthropicMessagesApi } from "@earendil-works/pi-ai/api/anthropic-messages.lazy";
-import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import { googleProvider } from "@earendil-works/pi-ai/providers/google";
@@ -25,7 +24,8 @@ let catalogs: { gemini: Listed; pi: Listed } | undefined;
 export function prices(p: ProviderConfig): { input: number; output: number; cacheRead: number; cacheWrite: number } {
 	catalogs ??= { gemini: googleProvider().getModels(), pi: anthropicProvider().getModels() };
 	// ponytail: base tier only (Haiku charges more above 100k input tokens); add tiers when a request gets that big.
-	const listed = p.kind === "openai" ? undefined : catalogs[p.kind].find((m) => m.id === p.model)?.cost;
+	// An OpenAI-compatible provider running a known Gemini model (Gemini's endpoint) gets its catalog price.
+	const listed = catalogs[p.kind === "openai" ? "gemini" : p.kind].find((m) => m.id === p.model)?.cost;
 	const input = p.priceIn ?? listed?.input ?? 0;
 	const cached = p.priceIn === null ? listed : undefined;
 	return { input, output: p.priceOut ?? listed?.output ?? 0, cacheRead: cached?.cacheRead ?? input, cacheWrite: cached?.cacheWrite ?? input };
@@ -49,20 +49,19 @@ function piProvider(p: ProviderConfig) {
 }
 
 /** A vision chat model for a configured provider; limits are generous because Boron sends few, large requests. */
-function model(p: ProviderConfig): Model<"google-generative-ai"> | Model<"openai-completions"> {
-	const input: Model<"openai-completions">["input"] = ["text", "image"];
-	const base = {
+function model(p: ProviderConfig): Model<"openai-completions"> {
+	return {
 		id: p.model,
 		name: p.model,
 		provider: p.id,
 		baseUrl: p.baseUrl,
 		reasoning: false,
-		input,
+		input: ["text", "image"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: 1_000_000,
 		maxTokens: 65_536,
+		api: "openai-completions",
 	};
-	return p.kind === "gemini" ? { ...base, api: "google-generative-ai" } : { ...base, api: "openai-completions" };
 }
 
 function provider(p: ProviderConfig) {
@@ -74,7 +73,7 @@ function provider(p: ProviderConfig) {
 		// Keyless local servers (Ollama) still need a key-shaped value for the OpenAI client.
 		auth: { apiKey: { name: p.name, resolve: async () => ({ auth: { apiKey: p.apiKey || "none" } }) } },
 		models: [model(p)],
-		api: p.kind === "gemini" ? googleGenerativeAIApi() : openAICompletionsApi(),
+		api: openAICompletionsApi(),
 	});
 }
 

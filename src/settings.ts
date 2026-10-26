@@ -12,8 +12,8 @@ export type Stage = (typeof STAGES)[number];
 export type ProviderConfig = {
 	id: string;
 	name: string;
-	/** `gemini`: Google's native API. `openai`: any OpenAI-compatible endpoint (Gemini's, Ollama, vLLM, OpenRouter). */
-	kind: "gemini" | "openai" | "pi";
+	/** `openai`: any OpenAI-compatible endpoint (Gemini's, Ollama, vLLM, OpenRouter). `pi`: Claude through pi's login. */
+	kind: "openai" | "pi";
 	baseUrl: string;
 	apiKey: string;
 	model: string;
@@ -49,7 +49,10 @@ export type Settings = {
 	polish: boolean;
 };
 
-export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
+/** Gemini's OpenAI-compatible endpoint. */
+export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
+/** The native Gemini API of the removed "gemini" kind, migrated to GEMINI_BASE_URL. */
+const GEMINI_NATIVE_URL = /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/*$/;
 export const PI_BASE_URL = "https://api.anthropic.com";
 export const PI_DEFAULT_MODEL = "claude-haiku-5-5";
 
@@ -60,7 +63,7 @@ export function defaultSettings(): Settings {
 				{
 					id: "gemini",
 					name: "Gemini",
-					kind: "gemini",
+					kind: "openai",
 					baseUrl: GEMINI_BASE_URL,
 					apiKey: key,
 					// Alias for the newest Flash-Lite: the cheapest current Gemini with a free tier.
@@ -158,8 +161,10 @@ function parseProvider(raw: unknown, stored: Settings): ProviderConfig {
 	if (!isObj(raw)) throw new Invalid("each provider must be an object");
 	const id = text(raw, "id");
 	if (!/^[a-z0-9-]{1,40}$/.test(id)) throw new Invalid(`provider id "${id}" must be 1–40 of a–z, 0–9 and -`);
-	const kind = raw.kind;
-	if (kind !== "gemini" && kind !== "openai" && kind !== "pi") throw new Invalid(`provider ${id}: kind must be gemini, openai or pi`);
+	// Settings saved before the native Gemini kind was dropped: same provider through Gemini's OpenAI-compatible endpoint.
+	const gemini = raw.kind === "gemini";
+	const kind = gemini ? "openai" : raw.kind;
+	if (kind !== "openai" && kind !== "pi") throw new Invalid(`provider ${id}: kind must be openai or pi`);
 	const model = text(raw, "model");
 	if (model === "") throw new Invalid(`provider ${id}: model is required`);
 	if (kind === "pi" && !piModelIds().includes(model)) {
@@ -167,7 +172,8 @@ function parseProvider(raw: unknown, stored: Settings): ProviderConfig {
 	}
 	// pi's login carries its own endpoint and credential.
 	const endpoint: Obj = kind === "pi" ? { baseUrl: PI_BASE_URL, apiKey: "" } : raw;
-	const baseUrl = text(endpoint, "baseUrl") || (kind === "gemini" ? GEMINI_BASE_URL : "");
+	const given = text(endpoint, "baseUrl");
+	const baseUrl = gemini && (given === "" || GEMINI_NATIVE_URL.test(given)) ? GEMINI_BASE_URL : given;
 	if (!/^https?:\/\/\S+$/.test(baseUrl)) throw new Invalid(`provider ${id}: base URL must start with http:// or https://`);
 	const key = text(endpoint, "apiKey");
 	// The browser only ever sees a masked key; sending it back unchanged keeps the stored one, but only for the
