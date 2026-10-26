@@ -26,7 +26,7 @@ export type ProviderConfig = {
 	priceOut: number | null;
 };
 
-export type Prompts = { ocr: string; proofread: string; metadata: string };
+export type Prompts = { ocr: string; proofread: string; metadata: string; translate: string; polish: string; glossary: string };
 
 export type Settings = {
 	providers: ProviderConfig[];
@@ -43,6 +43,10 @@ export type Settings = {
 	cleanScans: boolean;
 	prompts: Prompts;
 	tocDepth: number;
+	/** Translation: about how many English words go in one chunk (one request). */
+	chunkWords: number;
+	/** Translation: revise each draft against the English in a second request. */
+	polish: boolean;
 };
 
 export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
@@ -83,6 +87,8 @@ export function defaultSettings(): Settings {
 		cleanScans: false,
 		prompts: { ...DEFAULT_PROMPTS },
 		tocDepth: 2,
+		chunkWords: 3000,
+		polish: true,
 	};
 }
 
@@ -226,8 +232,18 @@ export function parseSettings(input: unknown, stored: Settings): Settings | { er
 			tesseractFallback: input.tesseractFallback === true,
 			figures: input.figures === true,
 			cleanScans: input.cleanScans === true,
-			prompts: { ocr: prompt("ocr"), proofread: prompt("proofread"), metadata: prompt("metadata") },
+			prompts: {
+				ocr: prompt("ocr"),
+				proofread: prompt("proofread"),
+				metadata: prompt("metadata"),
+				translate: prompt("translate"),
+				polish: prompt("polish"),
+				glossary: prompt("glossary"),
+			},
 			tocDepth: int(input, "tocDepth", 1, 6, "TOC depth"),
+			// Settings saved before translation existed have neither.
+			chunkWords: input.chunkWords === undefined ? 3000 : int(input, "chunkWords", 200, 20_000, "words per chunk"),
+			polish: input.polish === undefined ? true : input.polish === true,
 		};
 	} catch (error) {
 		if (error instanceof Invalid) return { error: error.message };

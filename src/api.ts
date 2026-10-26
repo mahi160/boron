@@ -1,18 +1,19 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { access, readFile, writeFile } from "node:fs/promises";
+import { createCanvas } from "@napi-rs/canvas";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Boron } from "./boron.ts";
-import { assemblyPages, exportEpub } from "./epub/export.ts";
+import { assemblyPages, exportEpub, exportTranslation } from "./epub/export.ts";
 import { proposeToc } from "./epub/assemble.ts";
-import { cropFigure } from "./figures.ts";
+import { EpubError, readEpub } from "./epub/source.ts";
+import { cropFigure, toCoverJpeg } from "./figures.ts";
 import { pageLabels } from "./page-labels.ts";
 import { isObj } from "./json.ts";
 import { pdfPageCount } from "./render.ts";
 import type { Figure } from "./pipeline/contract.ts";
 import { testProvider } from "./provider-test.ts";
 import { getSettings, parseSettings, publicSettings, saveSettings, type Settings } from "./settings.ts";
-import type { Book, Store, TocEntry } from "./store.ts";
+import type { Book, GlossaryEntry, Store, TocEntry } from "./store.ts";
 
 class HttpError extends Error {
 	readonly status: 400 | 403 | 404 | 409;
@@ -65,13 +66,14 @@ function parseToc(value: unknown, pageCount: number): TocEntry[] | null {
 	});
 }
 
-/** JPEG of an uploaded image, scaled to at most 1600px tall. */
-async function toCoverJpeg(data: ArrayBuffer): Promise<Buffer> {
-	const image = await loadImage(Buffer.from(data));
-	const scale = Math.min(1, 1600 / image.height);
-	const canvas = createCanvas(Math.round(image.width * scale), Math.round(image.height * scale));
-	canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-	return canvas.encode("jpeg", 88);
+function parseGlossary(value: unknown): GlossaryEntry[] {
+	if (!Array.isArray(value) || value.length > 2000) throw new HttpError(400, "glossary must be a list of at most 2000 entries");
+	return value.flatMap((g) => {
+		if (!isObj(g)) throw new HttpError(400, "each glossary entry must be an object");
+		const en = str(g, "en", 200);
+		const bn = str(g, "bn", 200);
+		return en === "" && bn === "" ? [] : [{ en, bn }];
+	});
 }
 
 /** A sample image for the provider test: page 1 of the newest rendered book, or a drawn line of text. */
@@ -187,6 +189,43 @@ export function createApi(boron: Boron, store: Store) {
 		if (firstPage > pages) throw new HttpError(400, `${file.name} has only ${pages} pages`);
 		if (lastPage !== null && lastPage < firstPage) throw new HttpError(400, "The last page must not come before the first");
 		return c.json({ id: await boron.addBook(file.name, data, { firstPage, lastPage: lastPage === null ? null : Math.min(lastPage, pages) }) }, 201);
+	});
+
+	// An English EPUB to translate to Bangla.
+	api.post("/translate", async (c) => {
+		const file = (await c.req.parseBody()).file;
+		if (!(file instanceof File)) throw new HttpError(400, "Upload an EPUB as the form field \"file\"");
+		const data = new Uint8Array(await file.arrayBuffer());
+		let source: ReturnType<typeof readEpub>;
+		try {
+			source = readEpub(data);
+		} catch (error) {
+			if (error instanceof EpubError) throw new HttpError(400, error.message);
+			throw error;
+		}
+		if (source.markdown.trim() === "") throw new HttpError(400, "That EPUB has no text to translate");
+		return c.json({ id: await boron.addEpub(file.name, data, source) }, 201);
+	});
+
+	api.get("/books/:id/glossary", (c) => c.json({ glossary: bookOf(c.req.param("id")).glossary }));
+
+	api.put("/books/:id/glossary", async (c) => {
+		const book = bookOf(c.req.param("id"));
+		if (book.kind !== "epub-translate") throw new HttpError(400, "Only translation books have a glossary");
+		store.updateBook(book.id, { glossary: parseGlossary((await body(c)).glossary) });
+		return c.json({ glossary: store.book(book.id)?.glossary ?? null });
+	});
+
+	api.get("/books/:id/images/:file", async (c) => {
+		const book = bookOf(c.req.param("id"));
+		const file = c.req.param("file");
+		if (!/^\w[\w.-]*$/.test(file)) throw new HttpError(404, "No such image");
+		const data = await readFile(boron.files.image(book.id, file)).catch(() => {
+			throw new HttpError(404, "No such image");
+		});
+		const type = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif", webp: "image/webp" }[file.split(".").pop()?.toLowerCase() ?? ""];
+		// SVG and unknown types download rather than run in the page.
+		return new Response(data, { headers: { "content-type": type ?? "application/octet-stream", "cache-control": "no-cache" } });
 	});
 
 	api.get("/books/:id", async (c) => {
@@ -328,9 +367,10 @@ export function createApi(boron: Boron, store: Store) {
 		const input = await body(c);
 		const cover = input.cover;
 		const parsedCover =
-			isObj(cover) && cover.kind === "page"
+			// A translation book has no page images to take a cover from.
+			isObj(cover) && cover.kind === "page" && book.kind === "pdf-ocr"
 				? { kind: "page" as const, page: pageOf(book, String(cover.page)) }
-				: isObj(cover) && cover.kind === "upload"
+				: isObj(cover) && cover.kind === "upload" && (await access(boron.files.cover(book.id)).then(() => true, () => false))
 					? { kind: "upload" as const }
 					: book.cover;
 		const title = str(input, "title");
@@ -349,7 +389,7 @@ export function createApi(boron: Boron, store: Store) {
 		const book = bookOf(c.req.param("id"));
 		const file = (await c.req.parseBody()).file;
 		if (!(file instanceof File)) throw new HttpError(400, "Upload an image as the form field \"file\"");
-		const data = await toCoverJpeg(await file.arrayBuffer()).catch(() => {
+		const data = await toCoverJpeg(new Uint8Array(await file.arrayBuffer())).catch(() => {
 			throw new HttpError(400, "That file is not an image Boron can read (use JPEG or PNG)");
 		});
 		await writeFile(boron.files.cover(book.id), data);
@@ -359,6 +399,7 @@ export function createApi(boron: Boron, store: Store) {
 
 	api.get("/books/:id/cover", async (c) => {
 		const book = bookOf(c.req.param("id"));
+		if (book.cover.kind === "none") throw new HttpError(404, "This book has no cover");
 		const path = book.cover.kind === "upload" ? boron.files.cover(book.id) : boron.files.page(book.id, book.cover.page);
 		return jpeg(await readFile(path));
 	});
@@ -366,7 +407,16 @@ export function createApi(boron: Boron, store: Store) {
 	api.get("/books/:id/epub", async (c) => {
 		const book = bookOf(c.req.param("id"));
 		const settings = getSettings();
-		const epub = await exportEpub({
+		const epub =
+			book.kind === "epub-translate"
+				? await exportTranslation({
+						book,
+						pages: store.pages(book.id),
+						tocDepth: settings.tocDepth,
+						image: (file) => boron.files.image(book.id, file),
+						uploadedCover: boron.files.cover(book.id),
+					})
+				: await exportEpub({
 			book,
 			pages: store.pages(book.id),
 			tocDepth: settings.tocDepth,

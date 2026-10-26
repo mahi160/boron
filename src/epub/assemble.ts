@@ -152,10 +152,11 @@ export function proposeToc(pages: AssemblyPage[]): TocEntry[] {
  * the user's TOC (renames, levels, level 0 = not a heading, inserted `<page>:split` entries). Each level-1 heading
  * starts a chapter.
  */
-export function assemble(pages: AssemblyPage[], toc: TocEntry[] | null) {
+export function assemble(pages: AssemblyPage[], toc: TocEntry[] | null, options: { furniture: boolean } = { furniture: true }) {
 	const figures: FigureCrop[] = [];
 	const entries = new Map((toc ?? []).map((e) => [e.id, e]));
-	const repeated = repeatedFurniture(pages);
+	// Translation chunks come from an EPUB: they have no running headers, and repeated short lines are text.
+	const repeated = options.furniture ? repeatedFurniture(pages) : new Set<string>();
 	const segments: Segment[] = [];
 	let previous: AssemblyPage | undefined;
 	for (const page of pages) {

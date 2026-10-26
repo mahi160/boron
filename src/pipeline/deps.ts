@@ -12,6 +12,10 @@ export type Deps = {
 	changed: (bookId: string) => void;
 	/** Path of a book's uploaded PDF. */
 	sourcePdf: (bookId: string) => string;
+	/** Path of a translation book's uploaded EPUB. */
+	sourceEpub: (bookId: string) => string;
+	/** Path of an image a translation book's text references as `images/<file>`. */
+	bookImage: (bookId: string, file: string) => string;
 	/** Path of a rendered page image. */
 	pageImage: (bookId: string, page: number) => string;
 	/** Offline OCR of page images, one text per image. */

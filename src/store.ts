@@ -6,13 +6,19 @@ import { applyEdits, type Figure, type PageResult, proofreadText, type Suggestio
 
 /** App data: books, pages, batches, limiter log. pi-durable keeps its own database for tasks. */
 
+/** `pdf-ocr`: a scanned PDF read by OCR. `epub-translate`: an English EPUB translated to Bangla in chunks, one chunk per page row. */
+export type BookKind = "pdf-ocr" | "epub-translate";
 export type BookStatus = "rendering" | "running" | "paused" | "aborted" | "ready" | "failed";
-export type Cover = { kind: "page"; page: number } | { kind: "upload" };
+/** `upload`: cover.jpg in the book's folder (uploaded, or taken from the source EPUB). `none`: an EPUB without a cover. */
+export type Cover = { kind: "page"; page: number } | { kind: "upload" } | { kind: "none" };
+/** A name or term and the Bangla form every translated chunk uses for it. */
+export type GlossaryEntry = { en: string; bn: string };
 /** One chapter entry. `id` is `<page>:<heading index>` for a tagged heading or `<page>:split` for an inserted one. */
 export type TocEntry = { id: string; page: number; title: string; level: number };
 
 export type Book = {
 	id: string;
+	kind: BookKind;
 	fileName: string;
 	title: string;
 	author: string;
@@ -30,6 +36,8 @@ export type Book = {
 	taskId: TaskId | null;
 	cover: Cover;
 	toc: TocEntry[] | null;
+	/** Translation glossary; null until the glossary pass has run. */
+	glossary: GlossaryEntry[] | null;
 	error: string | null;
 	createdAt: number;
 };
@@ -40,7 +48,11 @@ export type PageRow = {
 	bookId: string;
 	page: number;
 	status: PageStatus;
+	/** Translation books: the chunk's English Markdown. */
+	source: string | null;
+	/** OCR text, or a chunk's draft translation. */
 	raw: PageResult | null;
+	/** Proofread text, or a chunk's polished translation. */
 	proofread: PageResult | null;
 	/** Proofreading corrections the proofread text was made from; spelling-like ones wait for a person. */
 	suggestions: Suggestion[] | null;
@@ -61,7 +73,8 @@ export type BatchRow = {
 	id: number;
 	bookId: string;
 	pages: number[];
-	job: "pages" | "metadata";
+	/** `translate`: one chunk of a translation book. `glossary`: the book's glossary pass. */
+	job: "pages" | "metadata" | "translate" | "glossary";
 	taskId: TaskId | null;
 	state: BatchState;
 	stage: string | null;
@@ -113,7 +126,7 @@ CREATE TABLE IF NOT EXISTS pages (
 );
 CREATE TABLE IF NOT EXISTS batches (
 	id INTEGER PRIMARY KEY AUTOINCREMENT, book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-	pages TEXT NOT NULL, job TEXT NOT NULL CHECK (job IN ('pages', 'metadata')),
+	pages TEXT NOT NULL, job TEXT NOT NULL CHECK (job IN ('pages', 'metadata', 'translate', 'glossary')),
 	-- The book task that planned this batch; null for a re-run started from the review screen.
 	owner INTEGER, task_id INTEGER,
 	state TEXT NOT NULL CHECK (state IN ('queued', 'running', 'waiting', 'retrying', 'done', 'failed', 'aborted')), stage TEXT, provider TEXT, wake_at INTEGER, note TEXT,
@@ -146,6 +159,7 @@ const taskIdOrNull = (value: unknown): TaskId | null => numOrNull(value) as Task
 function toBook(r: Row): Book {
 	return {
 		id: String(r.id),
+		kind: r.kind === "epub-translate" ? "epub-translate" : "pdf-ocr",
 		fileName: String(r.file_name),
 		title: String(r.title),
 		author: String(r.author),
@@ -159,6 +173,7 @@ function toBook(r: Row): Book {
 		taskId: taskIdOrNull(r.task_id),
 		cover: json<Cover>(r.cover) ?? { kind: "page", page: 1 },
 		toc: json<TocEntry[]>(r.toc),
+		glossary: json<GlossaryEntry[]>(r.glossary),
 		error: strOrNull(r.error),
 		createdAt: num(r.created_at),
 	};
@@ -169,6 +184,7 @@ function toPage(r: Row): PageRow {
 		bookId: String(r.book_id),
 		page: num(r.page),
 		status: String(r.status) as PageStatus,
+		source: strOrNull(r.source),
 		raw: json<PageResult>(r.raw),
 		proofread: json<PageResult>(r.proofread),
 		suggestions: json<Suggestion[]>(r.suggestions),
@@ -185,7 +201,7 @@ function toBatch(r: Row): BatchRow {
 		id: num(r.id),
 		bookId: String(r.book_id),
 		pages: json<number[]>(r.pages) ?? [],
-		job: r.job === "metadata" ? "metadata" : "pages",
+		job: String(r.job) as BatchRow["job"],
 		taskId: taskIdOrNull(r.task_id),
 		state: String(r.state) as BatchState,
 		stage: strOrNull(r.stage),
@@ -209,6 +225,7 @@ const BOOK_COLUMNS = {
 	taskId: "task_id",
 	cover: "cover",
 	toc: "toc",
+	glossary: "glossary",
 	error: "error",
 } as const;
 
@@ -250,6 +267,21 @@ export function openStore(path: string) {
 	addColumn("books", "first_page", "INTEGER NOT NULL DEFAULT 1");
 	addColumn("books", "last_page", "INTEGER");
 	addColumn("pages", "suggestions", "TEXT");
+	// Books made before EPUB translation are all OCR books.
+	addColumn("books", "glossary", "TEXT");
+	addColumn("pages", "source", "TEXT");
+	// The job CHECK of databases from before translation lacks the translation jobs; SQLite cannot alter a CHECK.
+	const batchesSql = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'batches'").get()?.sql;
+	if (typeof batchesSql === "string" && !batchesSql.includes("'glossary'")) {
+		db.exec(`BEGIN;
+			ALTER TABLE batches RENAME TO batches_old;
+			${batchesSql.replace("'metadata')", "'metadata', 'translate', 'glossary')")};
+			INSERT INTO batches SELECT * FROM batches_old;
+			DROP TABLE batches_old;
+			CREATE INDEX IF NOT EXISTS batches_book ON batches(book_id);
+			COMMIT;`);
+	}
+	addColumn("books", "kind", "TEXT NOT NULL DEFAULT 'pdf-ocr' CHECK (kind IN ('pdf-ocr', 'epub-translate'))");
 
 	function update(table: string, columns: Record<string, string>, where: string, id: SqlValue, patch: object) {
 		const entries = Object.entries(patch).filter(([key]) => key in columns);
@@ -266,10 +298,10 @@ export function openStore(path: string) {
 	return {
 		close: () => db.close(),
 
-		createBook(book: { id: string; fileName: string; title: string; firstPage: number; lastPage: number | null }): Book {
+		createBook(book: { id: string; kind: BookKind; fileName: string; title: string; firstPage: number; lastPage: number | null }): Book {
 			db.prepare(
-				"INSERT INTO books (id, file_name, title, status, cover, created_at, first_page, last_page) VALUES (?, ?, ?, 'rendering', ?, ?, ?, ?)",
-			).run(book.id, book.fileName, book.title, JSON.stringify({ kind: "page", page: 1 }), Date.now(), book.firstPage, book.lastPage);
+				"INSERT INTO books (id, kind, file_name, title, status, cover, created_at, first_page, last_page) VALUES (?, ?, ?, ?, 'rendering', ?, ?, ?, ?)",
+			).run(book.id, book.kind, book.fileName, book.title, JSON.stringify({ kind: "page", page: 1 }), Date.now(), book.firstPage, book.lastPage);
 			const created = this.book(book.id);
 			if (created === undefined) throw new Error(`book ${book.id} was not stored`);
 			return created;
@@ -291,6 +323,20 @@ export function openStore(path: string) {
 		initPages(bookId: string, count: number) {
 			const insert = db.prepare("INSERT OR IGNORE INTO pages (book_id, page, status) VALUES (?, ?, 'pending')");
 			for (let page = 1; page <= count; page++) insert.run(bookId, page);
+		},
+		/** A translation book's chunks as its pages, replacing any earlier split. */
+		initChunks(bookId: string, chunks: string[]) {
+			db.exec("BEGIN");
+			try {
+				db.prepare("DELETE FROM pages WHERE book_id = ?").run(bookId);
+				const insert = db.prepare("INSERT INTO pages (book_id, page, status, source) VALUES (?, ?, 'pending', ?)");
+				chunks.forEach((source, i) => insert.run(bookId, i + 1, source));
+				db.prepare("UPDATE books SET page_count = ?, rendered = ? WHERE id = ?").run(chunks.length, chunks.length, bookId);
+				db.exec("COMMIT");
+			} catch (error) {
+				db.exec("ROLLBACK");
+				throw error;
+			}
 		},
 		pages(bookId: string): PageRow[] {
 			return db.prepare("SELECT * FROM pages WHERE book_id = ? ORDER BY page").all(bookId).map(toPage);
@@ -410,6 +456,13 @@ export function openStore(path: string) {
 		/** Batches a crashed planning pass of `owner` recorded before its tasks were committed. */
 		deleteBatchesOf(owner: number) {
 			db.prepare("DELETE FROM batches WHERE owner = ?").run(owner);
+		},
+		/**
+		 * A translation book plans one batch at a time, each after the last settled, so a queued batch of `owner` is one a
+		 * crashed planning pass recorded before its task was committed.
+		 */
+		deleteQueuedBatchesOf(owner: number) {
+			db.prepare("DELETE FROM batches WHERE owner = ? AND state = 'queued'").run(owner);
 		},
 		batchByTask(taskId: number): BatchRow | undefined {
 			const row = db.prepare("SELECT * FROM batches WHERE task_id = ?").get(taskId);

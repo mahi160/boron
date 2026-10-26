@@ -23,7 +23,33 @@ export const DEFAULT_PROMPTS = {
 		"These are the first pages of a scanned Bangla book.",
 		"Find the title page and read the book's metadata exactly as printed.",
 	].join("\n"),
+	translate: [
+		"You translate an English book into Bangla, one chunk at a time.",
+		"Write modern standard Bangla (cholito bhasha) that reads naturally, faithful to the meaning, tone and register of the English. Translate everything: never summarize, skip or add anything.",
+		"Use the glossary's Bangla form for every name and term it lists. Write other names consistently in Bangla script.",
+		"The previous chunk's translation is given for context only, so the chunk continues it smoothly; do not translate or repeat it.",
+	].join("\n"),
+	polish: [
+		"You revise a draft Bangla translation of a chunk of an English book against the English.",
+		"Fix mistranslations, and translate anything the draft left out or remove anything it added. Then make it read fluently as modern standard Bangla (cholito bhasha), without changing the meaning.",
+		"Use the glossary's Bangla form for every name and term it lists. Keep the draft's wording wherever it is already right.",
+	].join("\n"),
+	glossary: [
+		"You prepare a glossary for translating an English book into Bangla.",
+		"List the names of people, places and organisations, and the recurring special terms, whose Bangla form must stay the same throughout the book, each with the Bangla form to use in modern standard Bangla spelling.",
+		"Leave out ordinary words that need no fixed translation.",
+	].join("\n"),
 };
+
+const MARKDOWN_RULES = `Keep the Markdown exactly as structured in the English: the same headings with the same number of #, the same paragraphs and blank lines, **bold**, *italic*, lists, > block quotes, and line breaks written as a backslash at the end of a line. Keep every image line ![alt](path) with its path unchanged; translate only its alt text.`;
+
+export const TRANSLATE_CONTRACT = `${MARKDOWN_RULES}
+Answer with the Bangla Markdown of the chunk only: no preamble, no notes, no code fence.`;
+
+export const POLISH_CONTRACT = `${MARKDOWN_RULES}
+Answer with the whole revised Bangla Markdown of the chunk only: no preamble, no list of changes, no code fence.`;
+
+export const GLOSSARY_CONTRACT = `Answer with JSON only: [{"en": "<name or term as written in the book>", "bn": "<its Bangla form>"}]`;
 
 export const PAGE_CONTRACT = `Answer with JSON only: an array with one object for every page image you were given, blank pages included (with empty markdown), in this shape:
 [{"page": <page number given before its image>,

@@ -17,9 +17,12 @@ export type EpubInput = {
 	/** Where each printed page starts, for pagebreak markers and the page list. */
 	pageBreaks: PageBreak[];
 	tocDepth: number;
-	cover: Buffer;
+	/** JPEG cover, or null for a book without one. */
+	cover: Buffer | null;
 	/** Cropped image of each figure the chapters reference. */
 	figures: { crop: FigureCrop; data: Buffer }[];
+	/** Other images the chapters reference by `file` (a path under OEBPS). */
+	images?: { file: string; data: Uint8Array; mediaType: string }[];
 };
 
 const md = new MarkdownIt({ html: false, xhtmlOut: true, linkify: false, typographer: false })
@@ -119,11 +122,15 @@ export async function writeEpub(book: EpubInput): Promise<Uint8Array> {
 <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
 </container>`),
 		"OEBPS/style.css": strToU8(CSS),
-		"OEBPS/cover.jpg": book.cover,
-		"OEBPS/cover.xhtml": strToU8(
-			xhtml(title, `<section class="cover" epub:type="cover"><img src="cover.jpg" alt="${escape(title)}"/></section>`),
-		),
 	};
+	if (book.cover !== null) {
+		files["OEBPS/cover.jpg"] = book.cover;
+		files["OEBPS/cover.xhtml"] = strToU8(
+			xhtml(title, `<section class="cover" epub:type="cover"><img src="cover.jpg" alt="${escape(title)}"/></section>`),
+		);
+	}
+	const images = book.images ?? [];
+	for (const image of images) files[`OEBPS/${image.file}`] = image.data;
 	for (const font of FONTS) files[`OEBPS/${font.file}`] = await readFile(font.source);
 	for (const figure of book.figures) files[`OEBPS/${figure.crop.file}`] = figure.data;
 	const labels = new Map(book.pageBreaks.map((b) => [String(b.page), b.label]));
@@ -152,13 +159,18 @@ export async function writeEpub(book: EpubInput): Promise<Uint8Array> {
 	const manifest = [
 		`<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`,
 		`<item id="css" href="style.css" media-type="text/css"/>`,
-		`<item id="cover-image" href="cover.jpg" media-type="image/jpeg" properties="cover-image"/>`,
-		`<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>`,
+		...(book.cover === null
+			? []
+			: [
+					`<item id="cover-image" href="cover.jpg" media-type="image/jpeg" properties="cover-image"/>`,
+					`<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>`,
+				]),
+		...images.map((image, i) => `<item id="img${i}" href="${escape(image.file)}" media-type="${escape(image.mediaType)}"/>`),
 		...FONTS.map((f, i) => `<item id="font${i}" href="${f.file}" media-type="font/woff"/>`),
 		...book.figures.map((f, i) => `<item id="fig${i}" href="${f.crop.file}" media-type="image/jpeg"/>`),
 		...chapters.map((_, i) => `<item id="ch${i + 1}" href="${chapterFile(i)}" media-type="application/xhtml+xml"/>`),
 	];
-	const spine = [`<itemref idref="cover" linear="yes"/>`, ...chapters.map((_, i) => `<itemref idref="ch${i + 1}"/>`)];
+	const spine = [...(book.cover === null ? [] : [`<itemref idref="cover" linear="yes"/>`]), ...chapters.map((_, i) => `<itemref idref="ch${i + 1}"/>`)];
 	const modified = new Date().toISOString().replace(/\.\d+Z$/, "Z");
 	const optional = [
 		book.author && `<dc:creator id="author">${escape(book.author)}</dc:creator>`,
@@ -173,8 +185,7 @@ export async function writeEpub(book: EpubInput): Promise<Uint8Array> {
 <dc:language>bn</dc:language>
 ${optional.join("\n")}
 <meta property="dcterms:modified">${modified}</meta>
-<meta name="cover" content="cover-image"/>
-</metadata>
+${book.cover === null ? "" : `<meta name="cover" content="cover-image"/>\n`}</metadata>
 <manifest>
 ${manifest.join("\n")}
 </manifest>

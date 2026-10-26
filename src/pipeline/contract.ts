@@ -18,6 +18,11 @@ export type PageResult = {
 	endsMidParagraph: boolean;
 };
 
+/** A page result of text alone (Tesseract, translation): no headings, figures or page furniture reported. */
+export function textResult(page: number, markdown: string): PageResult {
+	return { page, markdown, headings: [], figures: [], runningHeader: "", runningFooter: "", printedPageNumber: "", endsMidParagraph: false };
+}
+
 export type ParseResult = { ok: true; pages: PageResult[] } | { ok: false; error: string };
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };

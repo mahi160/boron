@@ -8,6 +8,8 @@ Boron turns scanned Bangla book PDFs into proofread EPUB3 books. It is a self-ho
 4. **Review.** Check the text beside the scan, and edit the text, chapters, illustrations, title and cover.
 5. **Download** the EPUB, with the Noto Serif Bengali font embedded.
 
+Boron also translates English EPUBs into Bangla EPUBs, on the **Translate** screen. The book is split into chunks of about 3,000 words (Settings → Translation; a paragraph is never split). One request first makes a glossary of names and terms. Each chunk is then translated in order into modern standard Bangla (cholito bhasha), with the previous chunk's translation as context, and a polish pass checks the draft against the English. Headings, bold, italic and images are kept; footnotes are not handled yet. Translation uses the providers of the **Proofread and translate** stage. You can edit the glossary, the title, author and cover, and each chunk beside its English, and translate chosen chunks again.
+
 Jobs are durable, built on [pi-durable](https://www.npmjs.com/package/@earendil-works/pi-durable). They survive restarts and crashes. They respect each provider's request limits, fail over to the next provider when one runs out of quota, and wait for the daily quota reset when all have run out.
 
 ## Run with Docker
@@ -82,7 +84,7 @@ Set `BORON_DATA_DIR` to keep data somewhere other than `./data`, and `PORT` to c
 | `src/boron.ts` | The app without HTTP: add, pause, resume, abort, re-run, delete books |
 | `src/api.ts` | Hono routes and the SSE change stream |
 | `src/pipeline/` | Durable tasks (`boron.book`, `boron.batch`), limiter, error classification, prompts, output contract |
-| `src/epub/` | Assembly (page joins, footnotes, figures, chapters) and EPUB3 writing |
+| `src/epub/` | Assembly (page joins, footnotes, figures, chapters), EPUB3 writing, and reading EPUBs to translate (`source.ts`) |
 | `src/store.ts` | App data in SQLite (`node:sqlite`) |
 | `web/` | React UI |
 | `PLAN.md` | Design decisions and findings |

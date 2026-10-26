@@ -24,6 +24,7 @@ const row = (page: number, raw: PageResult, extra: Partial<PageRow> = {}): PageR
 	bookId: "b1",
 	page,
 	status: "done",
+	source: null,
 	raw,
 	proofread: null,
 	suggestions: null,
@@ -37,6 +38,8 @@ const row = (page: number, raw: PageResult, extra: Partial<PageRow> = {}): PageR
 
 const book: Book = {
 	id: "0b6a3c62-6f0e-4b8e-9d55-0d8f8a1f6a11",
+	kind: "pdf-ocr",
+	glossary: null,
 	fileName: "gora.pdf",
 	title: "গোরা",
 	author: "রবীন্দ্রনাথ ঠাকুর",

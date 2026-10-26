@@ -6,6 +6,7 @@ import type { Settings } from "../src/settings.ts";
 import type { PageRow } from "../src/store.ts";
 import { addBook, answer, fauxModels, provider, startBoron, type TestBoron, testSettings, until } from "./helpers/boron.ts";
 import { tempDir } from "./helpers/books.ts";
+import { makeEpub } from "./helpers/epub.ts";
 import { makePdf } from "./helpers/pdf.ts";
 
 let t: TestBoron;
@@ -161,6 +162,46 @@ describe("books", () => {
 		expect((await api.request(`/books/${id}/pages/1/suggestions`, json("PUT", { decisions: [{ index: 0, find: "x", status: "maybe" }] }))).status).toBe(400);
 		// A decision on a suggestion that is no longer there.
 		expect((await api.request(`/books/${id}/pages/1/suggestions`, json("PUT", { decisions: [{ index: 0, find: "x", status: "accepted" }] }))).status).toBe(409);
+	});
+
+	it("rejects an upload to translate that is not an EPUB", async () => {
+		const form = new FormData();
+		form.append("file", new File([makePdf(1)], "gora.epub"));
+		const response = await api.request("/translate", { method: "POST", body: form });
+		expect(response.status).toBe(400);
+		expect((await read<{ error: string }>(response)).error).toContain("not an EPUB");
+	});
+
+	it("uploads an EPUB to translate, edits its glossary, metadata and a chunk, and exports with them", async () => {
+		const form = new FormData();
+		form.append("file", new File([makeEpub()], "small.epub", { type: "application/epub+zip" }));
+		const created = await api.request("/translate", { method: "POST", body: form });
+		expect(created.status).toBe(201);
+		const { id } = await read<{ id: string }>(created);
+		await until(t, () => t.store.book(id)?.status === "ready");
+		expect(t.store.book(id)).toMatchObject({ kind: "epub-translate", title: "The Small Book", author: "Ann Author" });
+		expect((await api.request(`/books/${id}/cover`)).headers.get("content-type")).toBe("image/jpeg");
+		expect((await api.request(`/books/${id}/images/1-map_1.png`)).headers.get("content-type")).toBe("image/png");
+		expect((await api.request(`/books/${id}/images/..`)).status).toBe(404);
+
+		const glossary = [{ en: "April", bn: "\u098f\u09aa\u09cd\u09b0\u09bf\u09b2" }];
+		expect(await read(api.request(`/books/${id}/glossary`, json("PUT", { glossary })))).toEqual({ glossary });
+		expect((await api.request(`/books/${id}/glossary`, json("PUT", { glossary: "x" }))).status).toBe(400);
+		await api.request(`/books/${id}/meta`, json("PUT", { title: "\u099b\u09cb\u099f \u09ac\u0987", author: "\u0985\u09cd\u09af\u09be\u09a8", publisher: "", year: "" }));
+		await api.request(`/books/${id}/pages/1`, json("PUT", { markdown: "# \u0985\u09a7\u09cd\u09af\u09be\u09af\u09bc \u098f\u0995\n\n\u09b8\u09ae\u09cd\u09aa\u09be\u09a6\u09bf\u09a4" }));
+
+		const files = unzipSync(new Uint8Array(await (await api.request(`/books/${id}/epub`)).arrayBuffer()));
+		const text = new TextDecoder();
+		expect(text.decode(files["OEBPS/ch001.xhtml"])).toContain("\u09b8\u09ae\u09cd\u09aa\u09be\u09a6\u09bf\u09a4");
+		const opf = text.decode(files["OEBPS/content.opf"]);
+		expect(opf).toContain("<dc:title>\u099b\u09cb\u099f \u09ac\u0987</dc:title>");
+		expect(opf).toContain('<dc:creator id="author">\u0985\u09cd\u09af\u09be\u09a8</dc:creator>');
+		expect(files["OEBPS/cover.jpg"]).toBeDefined();
+
+		// A chunk is translated again on its own (with the book's glossary as it is then).
+		const before = t.store.batches(id).length;
+		expect((await api.request(`/books/${id}/rerun`, json("POST", { pages: [1] }))).status).toBe(200);
+		expect(t.store.batches(id).slice(before).map((b) => ({ job: b.job, pages: b.pages }))).toEqual([{ job: "translate", pages: [1] }]);
 	});
 
 	it("rejects page numbers past the end and unknown books", async () => {

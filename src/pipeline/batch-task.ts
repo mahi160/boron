@@ -9,17 +9,17 @@ import {
 } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord/context";
 import { prices } from "../models.ts";
-import type { ProviderConfig, Stage } from "../settings.ts";
-import type { PageResult } from "./contract.ts";
+import type { ProviderConfig } from "../settings.ts";
+import { textResult } from "./contract.ts";
 import type { Deps } from "./deps.ts";
 import { classifyError, errorMessage } from "./errors.ts";
-import { instructions, type Job, jobStages, ocrImage, parseAnswer, requestContent } from "./jobs.ts";
+import { firstStep, instructions, type Job, jobStages, ocrImage, parseAnswer, providerStage, requestContent, type Step } from "./jobs.ts";
 import { resetBounds } from "./reset.ts";
 
 export type BatchInput = { bookId: string; batchId: number; pages: number[]; job: Job };
 
 type Attempt = {
-	stage: Stage;
+	stage: Step;
 	/** Providers that failed this stage with a non-quota error; tried last-resort only by Tesseract. */
 	skip: string[];
 	/** After a per-minute 429 the batch retries the same provider instead of failing over. */
@@ -35,6 +35,11 @@ type Task<P extends BatchState["phase"]> = RunningTask<BatchInput, Extract<Batch
 
 /** A model may answer badly twice; the third invalid answer flags the pages for review. */
 const MAX_INVALID = 3;
+
+/** Steps whose text the pages cannot do without: when they fail, the pages fail. The others keep the earlier step's text. */
+const required = (step: Step) => step === "ocr" || step === "translate";
+/** Jobs whose pages are book text, marked done or failed with the job. */
+const hasPages = (job: Job) => job === "pages" || job === "translate";
 
 function attempt(state: BatchState): Attempt {
 	return { stage: state.stage, skip: state.skip, pinned: state.pinned, invalid: state.invalid };
@@ -70,7 +75,7 @@ export function createBatchTask(deps: Deps) {
 
 	async function finish(task: Task<BatchState["phase"]>, runtime: Runtime, context: Context) {
 		const { bookId, pages, job } = task.input;
-		if (job === "pages") {
+		if (hasPages(job)) {
 			for (const page of pages) if (store.page(bookId, page)?.status === "pending") store.markPage(bookId, page, "done", null);
 		}
 		setBatch(task, { state: "done", wakeAt: null, note: null });
@@ -87,7 +92,7 @@ export function createBatchTask(deps: Deps) {
 
 	async function fail(task: Task<BatchState["phase"]>, runtime: Runtime, reason: string, context: Context) {
 		const { bookId, pages, job } = task.input;
-		if (job === "pages") for (const page of pages) store.markPage(bookId, page, "failed", reason);
+		if (hasPages(job)) for (const page of pages) store.markPage(bookId, page, "failed", reason);
 		setBatch(task, { state: "failed", wakeAt: null, note: reason });
 		await runtime.commit(() => ({ status: "terminal", outcome: { status: "completed", result: null } }), context);
 	}
@@ -97,17 +102,7 @@ export function createBatchTask(deps: Deps) {
 		setBatch(task, { state: "running", stage: "ocr", provider: "tesseract", wakeAt: null, note: null });
 		const texts = await deps.tesseract(await Promise.all(pages.map((page) => ocrImage(deps, bookId, page))));
 		pages.forEach((page, i) => {
-			const result: PageResult = {
-				page,
-				markdown: texts[i] ?? "",
-				headings: [],
-				figures: [],
-				runningHeader: "",
-				runningFooter: "",
-				printedPageNumber: "",
-				endsMidParagraph: false,
-			};
-			store.saveResult(bookId, result, "ocr", "tesseract", true);
+			store.saveResult(bookId, textResult(page, texts[i] ?? ""), "ocr", "tesseract", true);
 			store.markPage(bookId, page, "done", "Read by Tesseract; re-run with a model for better text");
 		});
 		// Proofreading needs a model; Tesseract pages skip it.
@@ -120,14 +115,18 @@ export function createBatchTask(deps: Deps) {
 		const settings = deps.settings();
 		const ocrFallback = stage === "ocr" && task.input.job === "pages" && (configured.length === 0 || settings.tesseractFallback);
 		if (ocrFallback) return runTesseract(task, runtime, context);
-		if (configured.length === 0 || (wake === undefined && stage !== "ocr")) {
-			// No model for proofread or metadata (or all of them failed): keep what the earlier stage produced.
-			if (stage === "proofread" && skip.length > 0) {
-				for (const page of task.input.pages) store.markPage(task.input.bookId, page, "done", "Proofread failed; showing raw OCR");
+		if (!required(stage) && (configured.length === 0 || wake === undefined)) {
+			// No model for proofread, polish, metadata or the glossary (or all of them failed): keep what the earlier stage produced.
+			if ((stage === "proofread" || stage === "polish") && skip.length > 0) {
+				const flag = stage === "polish" ? "Polish failed; showing the draft" : "Proofread failed; showing raw OCR";
+				for (const page of task.input.pages) store.markPage(task.input.bookId, page, "done", flag);
 			}
 			return finish(task, runtime, context);
 		}
-		if (wake === undefined) return fail(task, runtime, "Every OCR provider failed for these pages", context);
+		if (wake === undefined) {
+			const reason = stage === "translate" ? "No translation provider could translate this chunk" : "Every OCR provider failed for these pages";
+			return fail(task, runtime, reason, context);
+		}
 		const reset = new Date(wake).toISOString();
 		return sleep(task, runtime, wake, task.state.checkpoint, `All providers are out of quota until ${reset}`, context);
 	}
@@ -135,13 +134,13 @@ export function createBatchTask(deps: Deps) {
 	return defineTask<BatchInput, BatchState, null>({
 		name: "boron.batch",
 		version: 1,
-		initial: (input) => ({ phase: "pick", stage: input.job === "metadata" ? "assemble" : "ocr", skip: [], pinned: null, invalid: 0 }),
+		initial: (input) => ({ phase: "pick", stage: firstStep(input.job), skip: [], pinned: null, invalid: 0 }),
 		phases: {
 			pick: async (task, runtime, context) => {
 				const settings = deps.settings();
 				const state = task.state.checkpoint;
 				const stage = state.stage;
-				const configured = settings.stages[stage].flatMap((id) => settings.providers.find((p) => p.id === id) ?? []);
+				const configured = settings.stages[providerStage(stage)].flatMap((id) => settings.providers.find((p) => p.id === id) ?? []);
 				const usable = configured.filter((p) => !state.skip.includes(p.id));
 				const ordered = [...usable.filter((p) => p.id === state.pinned), ...usable.filter((p) => p.id !== state.pinned)];
 				const now = deps.now();
@@ -241,20 +240,29 @@ export function createBatchTask(deps: Deps) {
 						at: deps.now(),
 					});
 				}
-				const parsed = parseAnswer(job, state.stage, answerText(answer), pages, (page) => store.page(bookId, page)?.raw ?? null);
+				const parsed = parseAnswer(job, state.stage, answerText(answer), pages, (page) => store.page(bookId, page));
 				if (!parsed.ok) {
 					const invalid = state.invalid + 1;
 					if (invalid < MAX_INVALID) return pick(task, runtime, { ...attempt(state), pinned: state.provider, invalid }, context);
-					if (job === "pages") {
-						const flag = state.stage === "ocr" ? `The model's answer was not valid (${parsed.error})` : "Proofread failed; showing raw OCR";
-						for (const page of pages) store.markPage(bookId, page, state.stage === "ocr" ? "flagged" : "done", flag);
+					const must = required(state.stage);
+					if (hasPages(job)) {
+						const flag = must
+							? `The model's answer was not valid (${parsed.error})`
+							: state.stage === "polish"
+								? "Polish failed; showing the draft"
+								: "Proofread failed; showing raw OCR";
+						for (const page of pages) store.markPage(bookId, page, must ? "flagged" : "done", flag);
 					}
-					return state.stage === "ocr" ? finish(task, runtime, context) : advance(task, runtime, context);
+					return must ? finish(task, runtime, context) : advance(task, runtime, context);
 				}
 				const engine = `${provider?.name ?? state.provider} · ${provider?.model ?? ""}`;
-				if ("pages" in parsed) {
+				if ("glossary" in parsed) {
+					// The user may have made one while this ran; theirs stays.
+					if (store.book(bookId)?.glossary === null) store.updateBook(bookId, { glossary: parsed.glossary });
+				} else if ("pages" in parsed) {
 					for (const result of parsed.pages) {
-						const stage = state.stage === "proofread" ? "proofread" : "ocr";
+						// A draft translation is stored as the OCR text is, the polished one as the proofread text.
+						const stage = state.stage === "proofread" || state.stage === "polish" ? "proofread" : "ocr";
 						store.saveResult(bookId, result, stage, engine, false, parsed.suggestions?.get(result.page) ?? null);
 					}
 				}
