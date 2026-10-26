@@ -126,6 +126,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
 			>
 				<div className="flex flex-col gap-3">
 					{logins.error !== null && <ErrorLine>{logins.error}</ErrorLine>}
+					{logins.data === undefined && logins.error === null && <p className="text-faint">Looking for logins…</p>}
 					{ollama.data != null && (
 						<div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-surface px-4 py-2.5">
 							<div>
@@ -153,11 +154,12 @@ function SettingsForm({ initial }: { initial: Settings }) {
 										<p className="text-xs text-faint">{l.models.length} image models</p>
 									</div>
 									<Button
+										disabled={s.providers.some((p) => p.login === l.id)}
 										onClick={() =>
 											addProvider({ name: l.label, kind: "login", login: l.id, baseUrl: "", apiKey: "", model: l.defaultModel, rpm: 0, rpd: 0, concurrency: 2, priceIn: null, priceOut: null })
 										}
 									>
-										Add
+										{s.providers.some((p) => p.login === l.id) ? "Added" : "Add"}
 									</Button>
 								</li>
 							))}
@@ -210,7 +212,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
 
 			<Section title="Daily quota reset" description="When providers' daily limits start again. Gemini resets at midnight Pacific time.">
 				<div className="grid gap-4 sm:grid-cols-2">
-					<Field label="Time">
+					<Field label="Time" hint="In the time zone beside it.">
 						{(id) => <input id={id} type="time" required value={s.quotaReset.time} onChange={(e) => set("quotaReset", { ...s.quotaReset, time: e.target.value })} />}
 					</Field>
 					<Field label="Time zone" hint="IANA name, e.g. America/Los_Angeles">

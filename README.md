@@ -14,16 +14,21 @@ Jobs are durable, built on [pi-durable](https://www.npmjs.com/package/@earendil-
 
 ## Run with Docker
 
-```sh
-docker build -t boron .
-docker run -d --name boron -p 3000:3000 -v boron-data:/data -e GEMINI_API_KEY=your-key boron
-```
-
-Or with Docker Compose, which reads `GEMINI_API_KEY` from `.env`:
+A multi-arch image (amd64, arm64) is published to `ghcr.io/mahi160/boron` on every push to `main`.
 
 ```sh
-docker compose up -d --build
+docker run -d --name boron -p 3000:3000 -v boron-data:/data -e GEMINI_API_KEY=your-key ghcr.io/mahi160/boron:latest
 ```
+
+Or with Docker Compose: copy [`compose.yaml`](compose.yaml) to the server (an optional `.env` beside it can set `GEMINI_API_KEY` and `PORT`) and run:
+
+```sh
+docker compose up -d
+```
+
+In **Portainer**, create a stack (Stacks → Add stack), paste `compose.yaml` into the web editor or point it at this repository, and set `GEMINI_API_KEY` under environment variables if you want one. To update, pull and redeploy the stack.
+
+To build the image yourself: `docker build -t ghcr.io/mahi160/boron:latest .`
 
 Open http://localhost:3000.
 
