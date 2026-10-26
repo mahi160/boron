@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyEdits, parsePageResults, parseProofread, proofreadText, toSuggestions } from "../src/pipeline/contract.ts";
+import { applyEdits, decideSuggestions, parsePageResults, parseProofread, proofreadText, toSuggestions } from "../src/pipeline/contract.ts";
 
 describe("proofreading suggestions", () => {
 	const ocr = "\u09b8\u09be\u09a7\u09be\u09b0\u09a8 \u0995\u09be\u09b2 \u09b2\u09cb\u0995 \u0995\u09be\u09b2";
@@ -14,6 +14,20 @@ describe("proofreading suggestions", () => {
 		expect(proofreadText(ocr, s)).toBe("\u09b8\u09be\u09a7\u09be\u09b0\u09a8 \u0995\u09be\u09b2 \u09b2\u09cb\u0995 \u0995\u09be\u09ae");
 		const accepted = s.map((x) => ({ ...x, status: x.status === "pending" ? ("accepted" as const) : x.status }));
 		expect(proofreadText(ocr, accepted)).toBe("\u09b8\u09be\u09a7\u09be\u09b0\u09a3 \u0995\u09be\u09b2 \u09b2\u09cb\u0995 \u0995\u09be\u09ae");
+	});
+
+	it("applies and undoes a decision in the user's edited text, and refuses where it cannot", () => {
+		const result = (markdown: string) => ({ page: 1, markdown, headings: [], figures: [], runningHeader: "", runningFooter: "", printedPageNumber: "", endsMidParagraph: false });
+		const suggestions = toSuggestions("cat sat", [{ find: "cat", replace: "cut" }]).map((s) => ({ ...s, status: "pending" as const }));
+		const row = { raw: result("cat sat"), proofread: result("cat sat"), suggestions, edited: "cat sat!" };
+		const accepted = decideSuggestions(row, [{ index: 0, find: "cat", status: "accepted" }]);
+		if ("error" in accepted) throw new Error(accepted.error);
+		expect([accepted.proofread.markdown, accepted.edited]).toEqual(["cut sat", "cut sat!"]);
+		const undone = decideSuggestions({ ...row, ...accepted }, [{ index: 0, find: "cat", status: "rejected" }]);
+		if ("error" in undone) throw new Error(undone.error);
+		expect([undone.proofread.markdown, undone.edited]).toEqual(["cat sat", "cat sat!"]);
+		expect(decideSuggestions({ ...row, edited: "dog" }, [{ index: 0, find: "cat", status: "accepted" }])).toHaveProperty("error");
+		expect(decideSuggestions(row, [{ index: 0, find: "dog", status: "accepted" }])).toEqual({ error: "The suggestions of this page changed; reload it" });
 	});
 });
 
