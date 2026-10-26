@@ -1,5 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { parsePageResults } from "../src/pipeline/contract.ts";
+import { applyEdits, parsePageResults, parseProofread, proofreadText, toSuggestions } from "../src/pipeline/contract.ts";
+
+describe("proofreading suggestions", () => {
+	const ocr = "\u09b8\u09be\u09a7\u09be\u09b0\u09a8 \u0995\u09be\u09b2 \u09b2\u09cb\u0995 \u0995\u09be\u09b2";
+	it("places each correction once in the OCR text, so any subset applies", () => {
+		const s = toSuggestions(ocr, [
+			{ find: "\u09b8\u09be\u09a7\u09be\u09b0\u09a8", replace: "\u09b8\u09be\u09a7\u09be\u09b0\u09a3" },
+			{ find: "\u09a8 \u0995\u09be\u09b2", replace: "\u09a8 \u0995\u09be\u09ae" }, // overlaps the first: dropped
+			{ find: "\u0995\u09be\u09b2", replace: "\u0995\u09be\u09ae" }, // twice in the text: dropped
+			{ find: "\u09b2\u09cb\u0995 \u0995\u09be\u09b2", replace: "\u09b2\u09cb\u0995 \u0995\u09be\u09ae" },
+		]);
+		expect(s.map((x) => [x.at, x.status])).toEqual([[0, "pending"], [11, "auto"]]);
+		expect(proofreadText(ocr, s)).toBe("\u09b8\u09be\u09a7\u09be\u09b0\u09a8 \u0995\u09be\u09b2 \u09b2\u09cb\u0995 \u0995\u09be\u09ae");
+		const accepted = s.map((x) => ({ ...x, status: x.status === "pending" ? ("accepted" as const) : x.status }));
+		expect(proofreadText(ocr, accepted)).toBe("\u09b8\u09be\u09a7\u09be\u09b0\u09a3 \u0995\u09be\u09b2 \u09b2\u09cb\u0995 \u0995\u09be\u09ae");
+	});
+});
+
+describe("proofreading corrections", () => {
+	it("parses the corrections of every requested page", () => {
+		const text = JSON.stringify([{ page: 2, edits: [{ find: "\u0995\u09be\u09b2", replace: "\u0995\u09be\u09b2\u09cb" }, { find: "" }] }, { page: 1, edits: [] }]);
+		expect(parseProofread(text, [1, 2])).toEqual({ ok: true, pages: [{ page: 1, edits: [] }, { page: 2, edits: [{ find: "\u0995\u09be\u09b2", replace: "\u0995\u09be\u09b2\u09cb" }] }] });
+		expect(parseProofread(JSON.stringify([{ page: 1 }]), [1])).toEqual({ ok: false, error: "page 1 has no edits list" });
+	});
+
+	it("applies an edit only where its text occurs exactly once", () => {
+		const result = applyEdits("\u098f\u0995 \u09a6\u09c1\u0987 \u098f\u0995", [
+			{ find: "\u09a6\u09c1\u0987", replace: "\u09a4\u09bf\u09a8" },
+			{ find: "\u098f\u0995", replace: "X" },
+			{ find: "\u09aa\u09be\u0981\u099a", replace: "Y" },
+		]);
+		expect(result).toEqual({ markdown: "\u098f\u0995 \u09a4\u09bf\u09a8 \u098f\u0995", skipped: 2 });
+	});
+});
 
 const page = (n: number, extra: object = {}) => ({
 	page: n,

@@ -8,6 +8,7 @@ import {
 	LiveDoc,
 } from "@earendil-works/pi-durable";
 import type { Context } from "@earendil-works/chord/context";
+import { prices } from "../models.ts";
 import type { ProviderConfig, Stage } from "../settings.ts";
 import type { PageResult } from "./contract.ts";
 import type { Deps } from "./deps.ts";
@@ -223,8 +224,24 @@ export function createBatchTask(deps: Deps) {
 				const { messages } = await runtime.context(state.conversationId, context);
 				const answer = messages.findLast((m): m is AssistantMessage => m.role === "assistant");
 				if (answer === undefined) throw new Error(`answer of batch ${batchId} is missing`);
-				store.addTokens(batchId, answer.usage.input, answer.usage.output);
-				const parsed = parseAnswer(job, answerText(answer), pages);
+				// Anthropic reports prompt-cached input apart from `input`; it is input all the same.
+				const { input, output, cacheRead, cacheWrite } = answer.usage;
+				store.addTokens(batchId, input + cacheRead + cacheWrite, output);
+				if (provider !== undefined) {
+					const price = prices(provider);
+					store.logUsage({
+						request: `batch:${task.id}:${state.conversationId}`,
+						bookId,
+						provider: provider.name,
+						model: provider.model,
+						stage: state.stage,
+						inputTokens: input + cacheRead + cacheWrite,
+						outputTokens: output,
+						cost: (input * price.input + cacheRead * price.cacheRead + cacheWrite * price.cacheWrite + output * price.output) / 1_000_000,
+						at: deps.now(),
+					});
+				}
+				const parsed = parseAnswer(job, state.stage, answerText(answer), pages, (page) => store.page(bookId, page)?.raw ?? null);
 				if (!parsed.ok) {
 					const invalid = state.invalid + 1;
 					if (invalid < MAX_INVALID) return pick(task, runtime, { ...attempt(state), pinned: state.provider, invalid }, context);
@@ -235,7 +252,12 @@ export function createBatchTask(deps: Deps) {
 					return state.stage === "ocr" ? finish(task, runtime, context) : advance(task, runtime, context);
 				}
 				const engine = `${provider?.name ?? state.provider} · ${provider?.model ?? ""}`;
-				if ("pages" in parsed) for (const result of parsed.pages) store.saveResult(bookId, result, state.stage === "proofread" ? "proofread" : "ocr", engine, false);
+				if ("pages" in parsed) {
+					for (const result of parsed.pages) {
+						const stage = state.stage === "proofread" ? "proofread" : "ocr";
+						store.saveResult(bookId, result, stage, engine, false, parsed.suggestions?.get(result.page) ?? null);
+					}
+				}
 				else {
 					const book = store.book(bookId);
 					const m = parsed.metadata;

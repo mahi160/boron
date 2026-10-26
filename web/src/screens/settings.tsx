@@ -12,15 +12,19 @@ const STAGES: { id: Stage; label: string; hint: string }[] = [
 const PRESETS: { label: string; make: () => Omit<ProviderConfig, "id"> }[] = [
 	{
 		label: "Gemini",
-		make: () => ({ name: "Gemini", kind: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", apiKey: "", model: "gemini-3.5-flash", rpm: 10, rpd: 250, concurrency: 2 }),
+		make: () => ({ name: "Gemini", kind: "gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta", apiKey: "", model: "gemini-flash-lite-latest", rpm: 10, rpd: 250, concurrency: 2, priceIn: null, priceOut: null }),
+	},
+	{
+		label: "Claude (pi login)",
+		make: () => ({ name: "Claude via pi", kind: "pi", baseUrl: "https://api.anthropic.com", apiKey: "", model: "claude-haiku-5-5", rpm: 0, rpd: 0, concurrency: 2, priceIn: null, priceOut: null }),
 	},
 	{
 		label: "OpenAI-compatible",
-		make: () => ({ name: "OpenAI-compatible", kind: "openai", baseUrl: "https://", apiKey: "", model: "", rpm: 0, rpd: 0, concurrency: 2 }),
+		make: () => ({ name: "OpenAI-compatible", kind: "openai", baseUrl: "https://", apiKey: "", model: "", rpm: 0, rpd: 0, concurrency: 2, priceIn: null, priceOut: null }),
 	},
 	{
 		label: "Ollama",
-		make: () => ({ name: "Ollama", kind: "openai", baseUrl: "http://localhost:11434/v1", apiKey: "", model: "qwen2.5vl", rpm: 0, rpd: 0, concurrency: 1 }),
+		make: () => ({ name: "Ollama", kind: "openai", baseUrl: "http://localhost:11434/v1", apiKey: "", model: "qwen2.5vl", rpm: 0, rpd: 0, concurrency: 1, priceIn: 0, priceOut: 0 }),
 	},
 ];
 
@@ -219,22 +223,51 @@ function ProviderCard({ provider: p, onChange, onRemove }: { provider: ProviderC
 			{(id) => <input id={id} type="number" min={0} step={1} required value={p[key]} onChange={(e) => field(key, e.target.valueAsNumber)} className="tabular-nums" />}
 		</Field>
 	);
+	const price = (key: "priceIn" | "priceOut", label: string) => (
+		<Field label={label}>
+			{(id) => (
+				<input
+					id={id}
+					type="number"
+					min={0}
+					step="any"
+					placeholder="catalog"
+					value={p[key] ?? ""}
+					onChange={(e) => field(key, e.target.value === "" ? null : e.target.valueAsNumber)}
+					className="tabular-nums"
+				/>
+			)}
+		</Field>
+	);
 	return (
 		<div className="rounded-lg border border-border bg-surface">
 			<div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-2.5">
 				<input aria-label="Provider name" value={p.name} onChange={(e) => field("name", e.target.value)} className="h-8 border-transparent px-1 font-medium hover:border-border" />
-				<span className="text-xs text-faint">{p.kind === "gemini" ? "Gemini API" : "OpenAI-compatible"}</span>
+				<span className="text-xs text-faint">{p.kind === "gemini" ? "Gemini API" : p.kind === "pi" ? "Claude, signed in through pi" : "OpenAI-compatible"}</span>
 			</div>
 			<div className="grid gap-4 p-4 sm:grid-cols-2">
-				<Field label="Base URL">{(id) => <input id={id} type="url" required value={p.baseUrl} onChange={(e) => field("baseUrl", e.target.value)} />}</Field>
-				<Field label="Model">{(id) => <input id={id} required value={p.model} onChange={(e) => field("model", e.target.value)} />}</Field>
-				<Field label="API key" hint={p.kind === "openai" ? "Leave empty for a local server." : undefined}>
-					{(id) => <input id={id} type={p.apiKey.startsWith("\u2022") ? "text" : "password"} autoComplete="off" value={p.apiKey} onChange={(e) => field("apiKey", e.target.value)} />}
+				{p.kind !== "pi" && <Field label="Base URL">{(id) => <input id={id} type="url" required value={p.baseUrl} onChange={(e) => field("baseUrl", e.target.value)} />}</Field>}
+				<Field label="Model" hint={p.kind === "pi" ? "A Claude model, e.g. claude-haiku-5-5. Thinking is off." : undefined}>
+					{(id) => <input id={id} required value={p.model} onChange={(e) => field("model", e.target.value)} />}
 				</Field>
+				{p.kind === "pi" ? (
+					<p className="text-sm text-muted">Uses the Claude login of pi on this machine (~/.pi/agent/auth.json). Run pi and /login if requests fail with an auth error.</p>
+				) : (
+					<Field label="API key" hint={p.kind === "openai" ? "Leave empty for a local server." : undefined}>
+						{(id) => <input id={id} type={p.apiKey.startsWith("\u2022") ? "text" : "password"} autoComplete="off" value={p.apiKey} onChange={(e) => field("apiKey", e.target.value)} />}
+					</Field>
+				)}
 				<div className="grid grid-cols-3 gap-3">
 					{limit("rpm", "Per minute", "0 = no limit")}
 					{limit("rpd", "Per day", "0 = no limit")}
 					{limit("concurrency", "At once", "0 = no limit")}
+				</div>
+				<div className="grid grid-cols-2 gap-3 sm:col-span-2 sm:grid-cols-4">
+					{price("priceIn", "Input price")}
+					{price("priceOut", "Output price")}
+					<p className="self-center text-xs text-faint sm:col-span-2">
+						USD per million tokens, for the Costs screen. Empty uses the catalog price of known Gemini and Claude models; set 0 on a free tier{p.kind === "pi" ? " or if your Claude plan covers it" : ""}.
+					</p>
 				</div>
 			</div>
 			<div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule px-4 py-2.5">

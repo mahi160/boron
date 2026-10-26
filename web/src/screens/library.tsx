@@ -3,7 +3,10 @@ import { api, type LibraryBook, urls, useLive } from "../api.ts";
 import { clock, count, until } from "../format.ts";
 import { href } from "../router.ts";
 import { BookStatus, isActive } from "../status.tsx";
-import { Button, ErrorLine, Progress, useAction, useNow } from "../ui.tsx";
+import { Button, Confirm, ErrorLine, Progress, useAction, useNow } from "../ui.tsx";
+
+type Range = { all: boolean; from: string; to: string };
+const ALL_PAGES: Range = { all: true, from: "1", to: "" };
 
 /** The line under the title: what is happening across the library right now. */
 function summary(books: LibraryBook[], now: number): string {
@@ -24,16 +27,26 @@ export function Library() {
 	const input = useRef<HTMLInputElement>(null);
 	const [dragging, setDragging] = useState(false);
 	const now = useNow();
+	// Chosen PDFs wait here until the user confirms or skips each one in the dialog.
+	const [queue, setQueue] = useState<{ id: number; file: File }[]>([]);
+	const nextId = useRef(0);
+	const [range, setRange] = useState<Range>(ALL_PAGES);
+	const current = queue[0];
 
-	async function add(files: FileList | null) {
+	function add(files: FileList | null) {
 		const pdfs = [...(files ?? [])].filter((f) => f.type === "application/pdf" || f.name.toLowerCase().endsWith(".pdf"));
-		if (pdfs.length === 0) return;
-		await upload.run(async () => {
-			for (const file of pdfs) {
-				const form = new FormData();
-				form.append("file", file);
-				await api.post("/books", form);
+		if (pdfs.length > 0) setQueue((q) => [...q, ...pdfs.map((file) => ({ id: nextId.current++, file }))]);
+	}
+
+	function send(file: File, chosen: Range) {
+		void upload.run(async () => {
+			const form = new FormData();
+			form.append("file", file);
+			if (!chosen.all) {
+				form.append("from", chosen.from);
+				form.append("to", chosen.to);
 			}
+			await api.post("/books", form);
 		});
 	}
 
@@ -58,12 +71,72 @@ export function Library() {
 					<h1 className="text-2xl font-semibold tracking-tight">Library</h1>
 					<p className="mt-1 text-muted">{books === undefined ? "Loading…" : summary(books, now)}</p>
 				</div>
-				<input ref={input} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(e) => void add(e.target.files).then(() => (e.target.value = ""))} />
+				<input
+					ref={input}
+					type="file"
+					accept="application/pdf,.pdf"
+					multiple
+					hidden
+					onChange={(e) => {
+						add(e.target.files);
+						e.target.value = "";
+					}}
+				/>
 				<Button variant="primary" disabled={upload.busy} onClick={() => input.current?.click()}>
 					{upload.busy ? "Uploading…" : "Add PDF"}
 				</Button>
 			</div>
 			<ErrorLine>{upload.error ?? error}</ErrorLine>
+
+			<Confirm
+				// A fresh dialog per file, so it opens again after Escape closed the previous one.
+				key={current?.id ?? -1}
+				open={current !== undefined}
+				title={`Add ${current?.file.name ?? "PDF"}?`}
+				action={range.all ? "Read all pages" : "Read these pages"}
+				onConfirm={() => current !== undefined && send(current.file, range)}
+				onClose={() => {
+					// Called again by the dialog's own close event; removing this file twice is harmless.
+					setQueue((q) => q.filter((item) => item.id !== current?.id));
+					setRange(ALL_PAGES);
+				}}
+			>
+				<fieldset className="flex flex-col gap-3">
+					<legend className="sr-only">Pages to read</legend>
+					<label className="flex items-center gap-2 text-ink">
+						<input type="radio" name="range" checked={range.all} onChange={() => setRange({ ...range, all: true })} />
+						All pages
+					</label>
+					<label className="flex items-center gap-2 text-ink">
+						<input type="radio" name="range" checked={!range.all} onChange={() => setRange({ ...range, all: false })} />
+						Only pages
+					</label>
+					<div className="flex items-center gap-2 pl-6">
+						<input
+							type="number"
+							min={1}
+							aria-label="First page"
+							value={range.from}
+							onChange={(e) => setRange({ ...range, all: false, from: e.target.value })}
+							className="w-20 tabular-nums"
+						/>
+						to
+						<input
+							type="number"
+							min={1}
+							aria-label="Last page"
+							placeholder="end"
+							value={range.to}
+							onChange={(e) => setRange({ ...range, all: false, to: e.target.value })}
+							className="w-20 tabular-nums"
+						/>
+					</div>
+					<p className="text-xs text-faint">
+						Pages as numbered in the PDF file, from 1. For example 1 to 10 reads the first ten pages, a cheap way to try a provider before reading a whole book.
+						{queue.length > 1 && ` ${queue.length - 1} more ${queue.length === 2 ? "PDF" : "PDFs"} after this one.`}
+					</p>
+				</fieldset>
+			</Confirm>
 
 			{books !== undefined && books.length === 0 ? (
 				<button

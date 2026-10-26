@@ -13,5 +13,5 @@
 		"verbatimModuleSyntax": true,
 		"skipLibCheck": true
 	},
-	"include": ["src"]
+	"include": ["src", "../src/markdown-it-plugins.d.ts"]
 }

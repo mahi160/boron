@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { TaskId } from "@earendil-works/pi-durable";
-import type { Figure, PageResult } from "./pipeline/contract.ts";
+import { applyEdits, type Figure, type PageResult, proofreadText, type Suggestion } from "./pipeline/contract.ts";
 
 /** App data: books, pages, batches, limiter log. pi-durable keeps its own database for tasks. */
 
@@ -18,7 +18,11 @@ export type Book = {
 	author: string;
 	publisher: string;
 	year: string;
+	/** Pages of the book: the PDF pages from `firstPage` to `lastPage`, renumbered from 1. */
 	pageCount: number;
+	/** The PDF pages the user chose to read; `lastPage` null = to the end. */
+	firstPage: number;
+	lastPage: number | null;
 	/** Pages rendered to images so far. */
 	rendered: number;
 	status: BookStatus;
@@ -38,6 +42,8 @@ export type PageRow = {
 	status: PageStatus;
 	raw: PageResult | null;
 	proofread: PageResult | null;
+	/** Proofreading corrections the proofread text was made from; spelling-like ones wait for a person. */
+	suggestions: Suggestion[] | null;
 	/** User-edited markdown; wins over model output until the page is re-run. */
 	edited: string | null;
 	/** User-adjusted figure boxes; win over model output. */
@@ -76,10 +82,18 @@ export type PageSummary = {
 	flag: string | null;
 	edited: boolean;
 	proofread: boolean;
+	/** Proofreading suggestions still waiting for a decision. */
+	pending: number;
 	/** Printed page number the model read, "" if none. */
 	printed: string;
 	pageLabel: string | null;
 };
+
+/** Requests, tokens and USD cost of a group of usage rows. */
+export type CostTotals = { requests: number; inputTokens: number; outputTokens: number; cost: number };
+export type CostByModel = CostTotals & { provider: string; model: string };
+export type CostByStage = CostByModel & { stage: string };
+export type CostByBook = CostTotals & { bookId: string; title: string; deleted: boolean };
 
 /** A task pi-durable set aside after it crashed the process repeatedly. */
 export type Parked = { taskId: TaskId; batchId: number | null; bookId: string | null; reason: string };
@@ -90,7 +104,8 @@ CREATE TABLE IF NOT EXISTS books (
 	publisher TEXT NOT NULL DEFAULT '', year TEXT NOT NULL DEFAULT '', page_count INTEGER NOT NULL DEFAULT 0,
 	rendered INTEGER NOT NULL DEFAULT 0,
 	status TEXT NOT NULL CHECK (status IN ('rendering', 'running', 'paused', 'aborted', 'ready', 'failed')),
-	task_id INTEGER, cover TEXT NOT NULL, toc TEXT, error TEXT, created_at INTEGER NOT NULL
+	task_id INTEGER, cover TEXT NOT NULL, toc TEXT, error TEXT, created_at INTEGER NOT NULL,
+	first_page INTEGER NOT NULL DEFAULT 1, last_page INTEGER
 );
 CREATE TABLE IF NOT EXISTS pages (
 	book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE, page INTEGER NOT NULL,
@@ -105,6 +120,14 @@ CREATE TABLE IF NOT EXISTS batches (
 	input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS batches_book ON batches(book_id);
+-- One row per answered model request, priced when it was made. Kept when its book is deleted, for the costs screen.
+CREATE TABLE IF NOT EXISTS usage (
+	book_id TEXT NOT NULL, book_title TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, stage TEXT NOT NULL,
+	input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cost REAL NOT NULL, at INTEGER NOT NULL,
+	-- The request's conversation: a phase replayed after a crash logs the same answer once.
+	request TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS usage_book ON usage(book_id);
 CREATE TABLE IF NOT EXISTS requests (provider TEXT NOT NULL, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS requests_provider_at ON requests(provider, at);
 CREATE TABLE IF NOT EXISTS exhausted (provider TEXT PRIMARY KEY, until INTEGER NOT NULL, reason TEXT NOT NULL);
@@ -129,6 +152,8 @@ function toBook(r: Row): Book {
 		publisher: String(r.publisher),
 		year: String(r.year),
 		pageCount: num(r.page_count),
+		firstPage: num(r.first_page),
+		lastPage: numOrNull(r.last_page),
 		rendered: num(r.rendered),
 		status: String(r.status) as BookStatus,
 		taskId: taskIdOrNull(r.task_id),
@@ -146,6 +171,7 @@ function toPage(r: Row): PageRow {
 		status: String(r.status) as PageStatus,
 		raw: json<PageResult>(r.raw),
 		proofread: json<PageResult>(r.proofread),
+		suggestions: json<Suggestion[]>(r.suggestions),
 		edited: strOrNull(r.edited),
 		figures: json<Figure[]>(r.figures),
 		engine: strOrNull(r.engine),
@@ -195,6 +221,14 @@ const BATCH_COLUMNS = {
 	note: "note",
 } as const;
 
+const TOTALS = "COUNT(*) AS requests, SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens, SUM(cost) AS cost";
+const totals = (r: Row): CostTotals => ({
+	requests: num(r.requests),
+	inputTokens: num(r.input_tokens),
+	outputTokens: num(r.output_tokens),
+	cost: num(r.cost),
+});
+
 type SqlValue = string | number | null;
 const sqlValue = (value: unknown): SqlValue =>
 	value === null || typeof value === "string" || typeof value === "number" ? value : JSON.stringify(value);
@@ -206,10 +240,16 @@ export function openStore(path: string) {
 	const db = new DatabaseSync(path);
 	db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
 	db.exec(SCHEMA);
-	// Databases created before page labels existed.
-	if (!db.prepare("PRAGMA table_info(pages)").all().some((c) => c.name === "page_label")) {
-		db.exec("ALTER TABLE pages ADD COLUMN page_label TEXT");
-	}
+	// Databases created before these columns existed.
+	const addColumn = (table: string, column: string, definition: string) => {
+		if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column)) {
+			db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+		}
+	};
+	addColumn("pages", "page_label", "TEXT");
+	addColumn("books", "first_page", "INTEGER NOT NULL DEFAULT 1");
+	addColumn("books", "last_page", "INTEGER");
+	addColumn("pages", "suggestions", "TEXT");
 
 	function update(table: string, columns: Record<string, string>, where: string, id: SqlValue, patch: object) {
 		const entries = Object.entries(patch).filter(([key]) => key in columns);
@@ -226,10 +266,10 @@ export function openStore(path: string) {
 	return {
 		close: () => db.close(),
 
-		createBook(book: { id: string; fileName: string; title: string }): Book {
+		createBook(book: { id: string; fileName: string; title: string; firstPage: number; lastPage: number | null }): Book {
 			db.prepare(
-				"INSERT INTO books (id, file_name, title, status, cover, created_at) VALUES (?, ?, ?, 'rendering', ?, ?)",
-			).run(book.id, book.fileName, book.title, JSON.stringify({ kind: "page", page: 1 }), Date.now());
+				"INSERT INTO books (id, file_name, title, status, cover, created_at, first_page, last_page) VALUES (?, ?, ?, 'rendering', ?, ?, ?, ?)",
+			).run(book.id, book.fileName, book.title, JSON.stringify({ kind: "page", page: 1 }), Date.now(), book.firstPage, book.lastPage);
 			const created = this.book(book.id);
 			if (created === undefined) throw new Error(`book ${book.id} was not stored`);
 			return created;
@@ -259,6 +299,7 @@ export function openStore(path: string) {
 			const rows = db
 				.prepare(
 					`SELECT page, status, engine, flag, edited IS NOT NULL AS edited, proofread IS NOT NULL AS proofread, page_label,
+					(SELECT COUNT(*) FROM json_each(COALESCE(suggestions, '[]')) WHERE json_extract(value, '$.status') = 'pending') AS pending,
 					COALESCE(NULLIF(json_extract(proofread, '$.printedPageNumber'), ''), json_extract(raw, '$.printedPageNumber'), '') AS printed
 					FROM pages WHERE book_id = ? ORDER BY page`,
 				)
@@ -270,6 +311,7 @@ export function openStore(path: string) {
 				flag: strOrNull(r.flag),
 				edited: r.edited === 1,
 				proofread: r.proofread === 1,
+				pending: num(r.pending),
 				printed: String(r.printed),
 				pageLabel: strOrNull(r.page_label),
 			}));
@@ -278,12 +320,62 @@ export function openStore(path: string) {
 			const row = db.prepare("SELECT * FROM pages WHERE book_id = ? AND page = ?").get(bookId, page);
 			return row === undefined ? undefined : toPage(row);
 		},
-		/** Store one stage's result. OCR resets the proofread text, which was made from the previous OCR. */
-		saveResult(bookId: string, result: PageResult, stage: "ocr" | "proofread", engine: string, done: boolean) {
+		/**
+		 * Store one stage's result. OCR resets the proofread text and its suggestions, which were made from the previous
+		 * OCR; proofread stores the suggestions it was made from.
+		 */
+		saveResult(
+			bookId: string,
+			result: PageResult,
+			stage: "ocr" | "proofread",
+			engine: string,
+			done: boolean,
+			suggestions: Suggestion[] | null = null,
+		) {
 			const column = stage === "ocr" ? "raw = ?, proofread = NULL" : "proofread = ?";
 			db.prepare(
-				`UPDATE pages SET ${column}, engine = ?, status = ?, flag = NULL WHERE book_id = ? AND page = ?`,
-			).run(JSON.stringify(result), engine, done ? "done" : "pending", bookId, result.page);
+				`UPDATE pages SET ${column}, suggestions = ?, engine = ?, status = ?, flag = NULL WHERE book_id = ? AND page = ?`,
+			).run(
+				JSON.stringify(result),
+				suggestions === null ? null : JSON.stringify(suggestions),
+				engine,
+				done ? "done" : "pending",
+				bookId,
+				result.page,
+			);
+		},
+		/**
+		 * Accept or reject proofreading suggestions and rebuild the proofread text from the OCR text. A decision names its
+		 * suggestion by index and `find`, so one made on a page since read again does not hit another. A page the user
+		 * edited keeps their text, with the change applied or undone in it; where that text no longer has the words exactly
+		 * once, nothing is decided. Returns why it could not decide, or null.
+		 */
+		decideSuggestions(bookId: string, page: number, decisions: { index: number; find: string; status: "accepted" | "rejected" }[]): string | null {
+			const row = this.page(bookId, page);
+			if (row?.raw == null || row.proofread === null || row.suggestions === null) return "This page has no proofreading suggestions";
+			const suggestions = row.suggestions.map((s) => ({ ...s }));
+			let edited = row.edited;
+			for (const { index, find, status } of decisions) {
+				const s = suggestions[index];
+				if (s === undefined || s.find !== find || s.status === "auto") return "The suggestions of this page changed; reload it";
+				if (s.status === status) continue;
+				const change = status === "accepted" ? s : s.status === "accepted" ? { find: s.replace, replace: s.find } : null;
+				if (edited !== null && change !== null) {
+					const result = applyEdits(edited, [change]);
+					if (result.skipped > 0) return `Your edited text does not have \u201c${change.find}\u201d exactly once; change it in the text box instead`;
+					edited = result.markdown;
+				}
+				s.status = status;
+			}
+			const proofread = { ...row.proofread, markdown: proofreadText(row.raw.markdown, suggestions) };
+			db.prepare("UPDATE pages SET proofread = ?, suggestions = ?, edited = ? WHERE book_id = ? AND page = ?").run(
+				JSON.stringify(proofread),
+				JSON.stringify(suggestions),
+				edited,
+				bookId,
+				page,
+			);
+			return null;
 		},
 		markPage(bookId: string, page: number, status: PageStatus, flag: string | null) {
 			db.prepare("UPDATE pages SET status = ?, flag = ? WHERE book_id = ? AND page = ?").run(status, flag, bookId, page);
@@ -343,6 +435,36 @@ export function openStore(path: string) {
 			db.prepare(
 				"UPDATE batches SET state = 'aborted', wake_at = NULL, updated_at = ? WHERE book_id = ? AND state NOT IN ('done', 'failed', 'aborted')",
 			).run(Date.now(), bookId);
+		},
+
+		logUsage(u: { request: string; bookId: string; provider: string; model: string; stage: string; inputTokens: number; outputTokens: number; cost: number; at: number }) {
+			const title = this.book(u.bookId)?.title ?? "";
+			db.prepare(
+				"INSERT OR IGNORE INTO usage (request, book_id, book_title, provider, model, stage, input_tokens, output_tokens, cost, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			).run(u.request, u.bookId, title, u.provider, u.model, u.stage, u.inputTokens, u.outputTokens, u.cost, u.at);
+		},
+		/** A book's costs per provider, model and stage. */
+		bookCosts(bookId: string): CostByStage[] {
+			return db
+				.prepare(`SELECT provider, model, stage, ${TOTALS} FROM usage WHERE book_id = ? GROUP BY provider, model, stage ORDER BY cost DESC`)
+				.all(bookId)
+				.map((r) => ({ provider: String(r.provider), model: String(r.model), stage: String(r.stage), ...totals(r) }));
+		},
+		/** Costs of every book, deleted ones included, per book and per provider and model. */
+		costs(): { byBook: CostByBook[]; byModel: CostByModel[] } {
+			const byBook = db
+				.prepare(
+					// The current title; for a deleted book, the title at its last request.
+					`SELECT u.book_id, COALESCE(b.title, (SELECT book_title FROM usage l WHERE l.book_id = u.book_id ORDER BY at DESC LIMIT 1)) AS book_title,
+					b.id IS NULL AS deleted, ${TOTALS} FROM usage u LEFT JOIN books b ON b.id = u.book_id GROUP BY u.book_id ORDER BY MAX(u.at) DESC`,
+				)
+				.all()
+				.map((r) => ({ bookId: String(r.book_id), title: String(r.book_title), deleted: r.deleted === 1, ...totals(r) }));
+			const byModel = db
+				.prepare(`SELECT provider, model, ${TOTALS} FROM usage GROUP BY provider, model ORDER BY cost DESC`)
+				.all()
+				.map((r) => ({ provider: String(r.provider), model: String(r.model), ...totals(r) }));
+			return { byBook, byModel };
 		},
 
 		logRequest(provider: string, at: number) {

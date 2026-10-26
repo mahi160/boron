@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 /** Everything Boron stores lives under one directory (`/data` in Docker). */
@@ -10,6 +11,8 @@ export const paths = {
 	// The Docker image ships the Bangla model outside the data volume.
 	tessdata: process.env.BORON_TESSDATA ?? join(DATA_DIR, "tessdata"),
 	books: join(DATA_DIR, "books"),
+	// pi's login file, for providers of kind "pi" (in Docker, mount pi's agent directory and point this at it).
+	piAuth: process.env.BORON_PI_AUTH ?? join(homedir(), ".pi", "agent", "auth.json"),
 };
 
 export const PORT = Number(process.env.PORT ?? 3000);

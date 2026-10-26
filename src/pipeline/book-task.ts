@@ -39,7 +39,8 @@ export function createBookTask(deps: Deps, Batch: BatchTask) {
 		phases: {
 			render: async (task, runtime, context) => {
 				const { bookId } = task.input;
-				if (store.book(bookId) === undefined) {
+				const book = store.book(bookId);
+				if (book === undefined) {
 					return runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted" } }), context);
 				}
 				store.updateBook(bookId, { status: "rendering" });
@@ -47,14 +48,17 @@ export function createBookTask(deps: Deps, Batch: BatchTask) {
 				const { imageMaxSide, jpegQuality } = deps.settings();
 				const pdf = await openPdf(deps.sourcePdf(bookId));
 				try {
-					store.updateBook(bookId, { pageCount: pdf.pageCount });
-					store.initPages(bookId, pdf.pageCount);
-					for (let page = 1; page <= pdf.pageCount; page++) {
+					// The upload checked the range against the PDF; book page n is PDF page firstPage + n - 1.
+					const last = Math.min(book.lastPage ?? pdf.pageCount, pdf.pageCount);
+					const pageCount = last - book.firstPage + 1;
+					store.updateBook(bookId, { pageCount });
+					store.initPages(bookId, pageCount);
+					for (let page = 1; page <= pageCount; page++) {
 						if (runtime.signal.aborted) return;
 						const path = deps.pageImage(bookId, page);
 						if (!(await exists(path))) {
 							await mkdir(dirname(path), { recursive: true });
-							await writeFile(`${path}.tmp`, await pdf.render(page, { maxSide: imageMaxSide, quality: jpegQuality }));
+							await writeFile(`${path}.tmp`, await pdf.render(book.firstPage + page - 1, { maxSide: imageMaxSide, quality: jpegQuality }));
 							await rename(`${path}.tmp`, path);
 						}
 						store.updateBook(bookId, { rendered: page });

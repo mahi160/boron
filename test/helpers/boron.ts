@@ -16,7 +16,7 @@ import { makePdf } from "./pdf.ts";
 import { tempDir } from "./books.ts";
 
 export function provider(id: string, limits: Partial<ProviderConfig> = {}): ProviderConfig {
-	return { id, name: id.toUpperCase(), kind: "openai", baseUrl: "http://faux", apiKey: "", model: "vision", rpm: 0, rpd: 0, concurrency: 0, ...limits };
+	return { id, name: id.toUpperCase(), kind: "openai", baseUrl: "http://faux", apiKey: "", model: "vision", rpm: 0, rpd: 0, concurrency: 0, priceIn: null, priceOut: null, ...limits };
 }
 
 export function testSettings(overrides: Partial<Settings> = {}): Settings {
@@ -56,10 +56,10 @@ export function answer(context: TranscriptContext) {
 	if (stageOf(context) === "metadata") {
 		return fauxAssistantMessage(JSON.stringify({ title: "গোরা", author: "রবীন্দ্রনাথ ঠাকুর", publisher: "", year: "1910" }));
 	}
-	const tag = stageOf(context) === "proofread" ? "শুদ্ধ" : "কাঁচা";
-	return fauxAssistantMessage(
-		JSON.stringify(requestedPages(context).map((page) => ({ page, markdown: `${tag} পাতা ${page}` }))),
-	);
+	if (stageOf(context) === "proofread") {
+		return fauxAssistantMessage(JSON.stringify(requestedPages(context).map((page) => ({ page, edits: [{ find: "কাঁচা", replace: "শুদ্ধ" }] }))));
+	}
+	return fauxAssistantMessage(JSON.stringify(requestedPages(context).map((page) => ({ page, markdown: `কাঁচা পাতা ${page}` }))));
 }
 
 export type Request = { provider: string; stage: string; pages: number[] };

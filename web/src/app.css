@@ -68,6 +68,52 @@
 	line-height: 1.9;
 }
 
+/* A page as the EPUB lays it out (see CSS in src/epub/epub.ts): no gap between paragraphs, first lines indented. */
+.page-preview {
+	p {
+		margin: 0;
+		text-indent: 1.5em;
+	}
+	h1, h2, h3, h4, h5, h6 {
+		font-weight: 600;
+		margin: 1em 0 0.5em;
+	}
+	h1 {
+		text-align: center;
+		font-size: 1.4em;
+	}
+	h1 + p, h2 + p, h3 + p, .verse p, li p {
+		text-indent: 0;
+	}
+	.verse {
+		margin: 1em 2em;
+	}
+	.verse p {
+		white-space: pre-line;
+		margin-bottom: 0.8em;
+	}
+	img {
+		max-width: 100%;
+		margin: 1em auto;
+	}
+	table {
+		border-collapse: collapse;
+		margin: 1em auto;
+	}
+	td, th {
+		border: 1px solid var(--color-border);
+		padding: 0.2em 0.5em;
+	}
+	ul, ol {
+		padding-left: 1.5em;
+		list-style: revert;
+	}
+	.footnotes {
+		font-size: 0.9em;
+		margin-top: 1em;
+	}
+}
+
 .drag-handle {
 	cursor: grab;
 	touch-action: none;

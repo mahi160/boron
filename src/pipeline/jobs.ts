@@ -3,9 +3,9 @@ import type { UserInput } from "@earendil-works/pi-durable";
 import { cleanScan } from "../clean.ts";
 import { isObj, parseJson, unfence } from "../json.ts";
 import type { Settings, Stage } from "../settings.ts";
-import { type PageResult, parsePageResults } from "./contract.ts";
+import { type PageResult, parsePageResults, parseProofread, proofreadText, type Suggestion, toSuggestions } from "./contract.ts";
 import type { Deps } from "./deps.ts";
-import { METADATA_CONTRACT, NO_FIGURES, PAGE_CONTRACT } from "./prompts.ts";
+import { METADATA_CONTRACT, NO_FIGURES, PAGE_CONTRACT, PROOFREAD_CONTRACT } from "./prompts.ts";
 
 /** A batch either reads pages (OCR, then proofread) or reads the title pages for metadata. */
 export type Job = "pages" | "metadata";
@@ -13,7 +13,8 @@ export type Job = "pages" | "metadata";
 export type BookMetadata = { title: string; author: string; publisher: string; year: string };
 
 export type Parsed =
-	| { ok: true; pages: PageResult[] }
+	/** `suggestions`: for proofread pages, the corrections the result was made from, by page. */
+	| { ok: true; pages: PageResult[]; suggestions?: Map<number, Suggestion[]> }
 	| { ok: true; metadata: BookMetadata }
 	| { ok: false; error: string };
 
@@ -26,6 +27,7 @@ export function jobStages(job: Job, settings: Settings): Stage[] {
 export function instructions(stage: Stage, settings: Settings): string {
 	const figures = settings.figures ? "" : `\n${NO_FIGURES}`;
 	if (stage === "assemble") return `${settings.prompts.metadata}\n\n${METADATA_CONTRACT}`;
+	if (stage === "proofread") return `${settings.prompts.proofread}\n\n${PROOFREAD_CONTRACT}`;
 	return `${settings.prompts[stage]}\n\n${PAGE_CONTRACT}${figures}`;
 }
 
@@ -46,8 +48,9 @@ export async function requestContent(deps: Deps, bookId: string, stage: Stage, p
 	for (const page of pages) {
 		let text = `Page ${page}`;
 		if (stage === "proofread") {
+			// Verbatim, not JSON-escaped, so corrections can quote it exactly.
 			const raw = deps.store.page(bookId, page)?.raw;
-			text += `\nOCR text of page ${page}:\n${JSON.stringify(raw ?? null)}`;
+			text += `\nOCR text of page ${page}, between the markers:\n<<<\n${raw?.markdown ?? ""}\n>>>`;
 		}
 		content.push({ type: "text", text }, await image(deps, bookId, page));
 	}
@@ -67,6 +70,24 @@ function parseMetadata(text: string): Parsed {
 	};
 }
 
-export function parseAnswer(job: Job, text: string, pages: number[]): Parsed {
-	return job === "metadata" ? parseMetadata(text) : parsePageResults(text, pages);
+/** Proofread pages: each page's OCR result with the corrections applied to its text. */
+function proofreadPages(text: string, pages: number[], raw: (page: number) => PageResult | null): Parsed {
+	const parsed = parseProofread(text, pages);
+	if (!parsed.ok) return parsed;
+	const results: PageResult[] = [];
+	const suggestions = new Map<number, Suggestion[]>();
+	for (const { page, edits } of parsed.pages) {
+		const ocr = raw(page);
+		if (ocr === null) return { ok: false, error: `page ${page} has no OCR text to proofread` };
+		// ponytail: corrections that cannot be placed are dropped silently; flag the page if they turn out common.
+		const list = toSuggestions(ocr.markdown, edits);
+		suggestions.set(page, list);
+		results.push({ ...ocr, markdown: proofreadText(ocr.markdown, list) });
+	}
+	return { ok: true, pages: results, suggestions };
+}
+
+export function parseAnswer(job: Job, stage: Stage, text: string, pages: number[], raw: (page: number) => PageResult | null): Parsed {
+	if (job === "metadata") return parseMetadata(text);
+	return stage === "proofread" ? proofreadPages(text, pages, raw) : parsePageResults(text, pages);
 }

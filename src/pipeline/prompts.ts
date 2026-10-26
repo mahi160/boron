@@ -16,6 +16,8 @@ export const DEFAULT_PROMPTS = {
 		"Words printed in English or another Latin script stay in that script exactly as printed; fix any that the OCR transliterated, translated or dropped. Remove any watermark, stamp or scanner credit text the OCR picked up.",
 		"Preserve the author's spelling, sadhu bhasha and punctuation exactly as printed, even where it looks old or nonstandard (for example বড়ো, দিলুম). Never modernize, rephrase or reflow the text.",
 		"Keep the Markdown structure unless the image shows it is wrong.",
+		"Change a word only where the OCR text differs from what the image shows. If the printed word itself is misspelled or uses an old or uncommon spelling (for example ন for ণ, or a missing vowel sign), keep it exactly as printed: you are matching the page, not correcting the author.",
+		"Report only the corrections, never the whole page again, and never an edit whose replace equals its find.",
 	].join("\n"),
 	metadata: [
 		"These are the first pages of a scanned Bangla book.",
@@ -33,6 +35,11 @@ export const PAGE_CONTRACT = `Answer with JSON only: an array with one object fo
   "printedPageNumber": "<printed page number or empty>",
   "endsMidParagraph": <true if the page's last paragraph continues on the next page>}]
 bbox values are integers 0-1000 relative to the page image. Report only real illustrations, not decorative rules.`;
+
+export const PROOFREAD_CONTRACT = `Answer with JSON only: an array with one object for every page you were given, in this shape:
+[{"page": <page number given before its image>,
+  "edits": [{"find": "<text copied exactly from the OCR text>", "replace": "<the corrected text>"}]}]
+Use an empty edits list when the OCR text has no errors. Copy "find" character for character from the OCR text between <<< and >>>, including spaces and punctuation, and make it long enough (a few words around the error) to occur only once on the page. Keep each edit small, and never let two edits cover the same text: every "find" quotes the OCR text as given, not as changed by another edit.`;
 
 export const NO_FIGURES = "Do not report figures: leave figures empty and put no figure placeholders in the markdown.";
 

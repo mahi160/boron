@@ -4,6 +4,7 @@ import { count } from "../format.ts";
 import { go, href, type Route } from "../router.ts";
 import { BookStatus, isActive } from "../status.tsx";
 import { Button, Confirm, ErrorLine, useAction } from "../ui.tsx";
+import { BookCosts } from "./costs.tsx";
 import { Details } from "./details.tsx";
 import { Job } from "./job.tsx";
 import { Review } from "./review.tsx";
@@ -16,12 +17,13 @@ const TABS: { id: BookRoute["tab"]; label: string }[] = [
 	{ id: "review", label: "Review" },
 	{ id: "structure", label: "Chapters" },
 	{ id: "details", label: "Details & cover" },
+	{ id: "costs", label: "Costs" },
 ];
 
 export function BookScreen({ route }: { route: BookRoute }) {
 	const { data, error, reload } = useLive<BookDetail>(`/books/${route.id}`, route.id);
 	const action = useAction();
-	const [confirm, setConfirm] = useState<"abort" | "delete" | null>(null);
+	const [confirm, setConfirm] = useState<"abort" | "delete" | "rerun" | null>(null);
 
 	if (data === undefined) {
 		return error === null ? <p className="text-faint">Loading…</p> : <NotFound message={error} />;
@@ -30,6 +32,7 @@ export function BookScreen({ route }: { route: BookRoute }) {
 	const control = (name: "pause" | "resume" | "abort") => action.run(() => api.post(`/books/${book.id}/${name}`).then(reload));
 	const active = isActive(book.status);
 	const read = book.done + book.flagged;
+	const toCheck = book.flagged + book.failed;
 
 	return (
 		<div className="flex flex-col gap-6">
@@ -67,11 +70,14 @@ export function BookScreen({ route }: { route: BookRoute }) {
 								{book.status === "paused" ? "Resume" : "Continue reading"}
 							</Button>
 						)}
-						{!active && (
-							<Button variant="danger" onClick={() => setConfirm("delete")}>
-								Delete
+						{!active && toCheck > 0 && (
+							<Button disabled={action.busy} onClick={() => setConfirm("rerun")}>
+								Read {toCheck} {toCheck === 1 ? "page" : "pages"} to check again
 							</Button>
 						)}
+						<Button variant="danger" onClick={() => setConfirm("delete")}>
+							Delete
+						</Button>
 						{read > 0 && (
 							<a href={urls.epub(book.id)} className="inline-flex h-8 items-center rounded-full bg-primary px-3.5 text-sm font-medium text-white hover:bg-black">
 								Download EPUB
@@ -98,6 +104,7 @@ export function BookScreen({ route }: { route: BookRoute }) {
 			{route.tab === "review" && <Review detail={data} reload={reload} page={Math.min(route.page, book.pageCount)} />}
 			{route.tab === "structure" && <Structure book={book} />}
 			{route.tab === "details" && <Details book={book} reload={reload} />}
+			{route.tab === "costs" && <BookCosts book={book} />}
 
 			<Confirm
 				open={confirm === "abort"}
@@ -109,6 +116,15 @@ export function BookScreen({ route }: { route: BookRoute }) {
 				Requests in flight are cancelled. The {count(read)} pages already read are kept, and you can continue later.
 			</Confirm>
 			<Confirm
+				open={confirm === "rerun"}
+				title={`Read ${toCheck} ${toCheck === 1 ? "page" : "pages"} again?`}
+				action="Read again"
+				onConfirm={() => void action.run(() => api.post(`/books/${book.id}/rerun-flagged`).then(reload))}
+				onClose={() => setConfirm(null)}
+			>
+				Every page marked to check or failed is read again from scratch; your edits and illustration boxes on those pages are replaced. It counts against the providers' limits like any request.
+			</Confirm>
+			<Confirm
 				open={confirm === "delete"}
 				title={`Delete “${book.title}”?`}
 				action="Delete book"
@@ -116,7 +132,8 @@ export function BookScreen({ route }: { route: BookRoute }) {
 				onConfirm={() => void action.run(() => api.delete(`/books/${book.id}`).then(() => go({ screen: "library" })))}
 				onClose={() => setConfirm(null)}
 			>
-				The PDF, its page images, all text and your edits are removed. This cannot be undone.
+				{active && "Reading stops first; requests in flight are cancelled. "}
+				The PDF, its page images, all text and your edits are removed. Its costs stay on the Costs screen. This cannot be undone.
 			</Confirm>
 		</div>
 	);

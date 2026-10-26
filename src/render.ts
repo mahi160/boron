@@ -9,6 +9,17 @@ export type RenderOptions = {
 	readonly quality: number;
 };
 
+/** Number of pages of a PDF; rejects if it cannot be opened. */
+export async function pdfPageCount(data: Uint8Array): Promise<number> {
+	// pdf.js takes ownership of the buffer it is given; keep the caller's.
+	const loading = getDocument({ data: data.slice(), verbosity: 0 });
+	try {
+		return (await loading.promise).numPages;
+	} finally {
+		await loading.destroy();
+	}
+}
+
 /**
  * Open a PDF for rendering. Pages are always rendered to images; the text layer is never used, because Bangla PDFs
  * often carry broken or legacy (Bijoy) encodings.

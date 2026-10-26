@@ -2,6 +2,11 @@ const number = new Intl.NumberFormat("en");
 
 export const count = (n: number) => number.format(n);
 
+const dollars = new Intl.NumberFormat("en", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 4 });
+
+/** "$0.0123": up to four decimals, since one page costs fractions of a cent. */
+export const usd = (n: number) => dollars.format(n);
+
 /** "in 3 h 12 m", "in 45 s", "now". */
 export function until(at: number, now: number): string {
 	const s = Math.max(0, Math.round((at - now) / 1000));

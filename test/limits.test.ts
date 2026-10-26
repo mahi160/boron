@@ -102,6 +102,8 @@ describe("limiter", () => {
 		rpm: 0,
 		rpd: 0,
 		concurrency: 0,
+		priceIn: null,
+		priceOut: null,
 		...limits,
 	});
 	const reset = { time: "00:00", timeZone: "UTC" };

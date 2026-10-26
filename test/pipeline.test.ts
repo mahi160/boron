@@ -238,6 +238,38 @@ describe("job control", () => {
 		expect(t.store.book(id)?.status).toBe("paused");
 	});
 
+	it("records each request's cost at the provider's price, and keeps it after the book is deleted", async () => {
+		const { models } = fauxModels(["a"], (context) => answer(context));
+		const t = await start({ settings: testSettings({ providers: [provider("a", { priceIn: 1, priceOut: 2 })], proofread: false }), models });
+		const id = await addBook(t, 2);
+		await ready(t, id);
+		const costs = t.store.bookCosts(id);
+		expect(costs.map((c) => c.stage).sort()).toEqual(["assemble", "ocr"]);
+		const ocr = costs.find((c) => c.stage === "ocr");
+		expect(ocr).toMatchObject({ provider: "A", model: "vision", stage: "ocr", requests: 1 });
+		expect(ocr?.inputTokens).toBeGreaterThan(0);
+		expect(ocr?.cost).toBeCloseTo(((ocr?.inputTokens ?? 0) * 1 + (ocr?.outputTokens ?? 0) * 2) / 1_000_000, 10);
+
+		await t.boron.remove(id);
+		expect(t.store.costs().byBook).toMatchObject([{ bookId: id, deleted: true, requests: 2 }]);
+		// The title at the last request: the file name, or the title the metadata request read, whichever logged last.
+		expect(["gora", "\u0997\u09cb\u09b0\u09be"]).toContain(t.store.costs().byBook[0]?.title);
+	});
+
+	it("deletes a book while it is being read", async () => {
+		const blocked = new Promise<void>(() => {});
+		const { models } = fauxModels(["a"], async (context, _provider, signal) => {
+			await Promise.race([blocked, new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve()))]);
+			return answer(context);
+		});
+		const t = await start({ settings: testSettings({ proofread: false }), models });
+		const id = await addBook(t, 2);
+		await until(t, () => t.store.batches(id).some((b) => b.state === "running"));
+		await t.boron.remove(id);
+		expect(t.store.book(id)).toBeUndefined();
+		expect(t.store.batches(id)).toEqual([]);
+	});
+
 	it("deletes a book with its files and rows", async () => {
 		const { models } = fauxModels(["a"], (context) => answer(context));
 		const t = await start({ settings: testSettings(), models });

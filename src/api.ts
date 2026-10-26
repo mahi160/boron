@@ -8,6 +8,7 @@ import { proposeToc } from "./epub/assemble.ts";
 import { cropFigure } from "./figures.ts";
 import { pageLabels } from "./page-labels.ts";
 import { isObj } from "./json.ts";
+import { pdfPageCount } from "./render.ts";
 import type { Figure } from "./pipeline/contract.ts";
 import { testProvider } from "./provider-test.ts";
 import { getSettings, parseSettings, publicSettings, saveSettings, type Settings } from "./settings.ts";
@@ -97,6 +98,7 @@ export function libraryEntry(store: Store, book: Book) {
 		done: count("done"),
 		flagged: count("flagged"),
 		failed: count("failed"),
+		suggestions: pages.reduce((sum, p) => sum + p.pending, 0),
 		nextWake: waits.length > 0 ? Math.min(...waits) : null,
 		inputTokens: batches.reduce((sum, b) => sum + b.inputTokens, 0),
 		outputTokens: batches.reduce((sum, b) => sum + b.outputTokens, 0),
@@ -172,7 +174,19 @@ export function createApi(boron: Boron, store: Store) {
 		if (!(file instanceof File)) throw new HttpError(400, "Upload a PDF as the form field \"file\"");
 		const data = new Uint8Array(await file.arrayBuffer());
 		if (new TextDecoder().decode(data.subarray(0, 5)) !== "%PDF-") throw new HttpError(400, "That file is not a PDF");
-		return c.json({ id: await boron.addBook(file.name, data) }, 201);
+		const pages = await pdfPageCount(data).catch(() => {
+			throw new HttpError(400, "That PDF cannot be opened");
+		});
+		// Optional page range; empty fields mean the first and the last page.
+		const bound = (name: string) => {
+			const value = form[name];
+			return typeof value === "string" && value.trim() !== "" ? int(value.trim(), name) : null;
+		};
+		const firstPage = bound("from") ?? 1;
+		const lastPage = bound("to");
+		if (firstPage > pages) throw new HttpError(400, `${file.name} has only ${pages} pages`);
+		if (lastPage !== null && lastPage < firstPage) throw new HttpError(400, "The last page must not come before the first");
+		return c.json({ id: await boron.addBook(file.name, data, { firstPage, lastPage: lastPage === null ? null : Math.min(lastPage, pages) }) }, 201);
 	});
 
 	api.get("/books/:id", async (c) => {
@@ -192,6 +206,10 @@ export function createApi(boron: Boron, store: Store) {
 			}),
 		});
 	});
+
+	api.get("/books/:id/costs", (c) => c.json(store.bookCosts(bookOf(c.req.param("id")).id)));
+
+	api.get("/costs", (c) => c.json(store.costs()));
 
 	api.post("/books/:id/:action{pause|resume|abort}", async (c) => {
 		const book = bookOf(c.req.param("id"));
@@ -220,6 +238,24 @@ export function createApi(boron: Boron, store: Store) {
 		const input = await body(c);
 		const markdown = input.markdown === null ? null : str(input, "markdown", 200_000);
 		store.saveEdit(book.id, page, markdown);
+		return c.json(store.page(book.id, page));
+	});
+
+	/** Accept or reject proofreading suggestions: `{ decisions: [{ index, find, status: "accepted" | "rejected" }] }`. */
+	api.put("/books/:id/pages/:page/suggestions", async (c) => {
+		const book = bookOf(c.req.param("id"));
+		const page = pageOf(book, c.req.param("page"));
+		const list = (await body(c)).decisions;
+		if (!Array.isArray(list)) throw new HttpError(400, "decisions must be a list");
+		const decisions = list.map((d): { index: number; find: string; status: "accepted" | "rejected" } => {
+			const status = isObj(d) ? d.status : undefined;
+			if (isObj(d) && Number.isInteger(d.index) && typeof d.find === "string" && (status === "accepted" || status === "rejected")) {
+				return { index: Number(d.index), find: d.find, status };
+			}
+			throw new HttpError(400, "each decision needs an index, its find text and a status of accepted or rejected");
+		});
+		const refused = store.decideSuggestions(book.id, page, decisions);
+		if (refused !== null) throw new HttpError(409, refused);
 		return c.json(store.page(book.id, page));
 	});
 
@@ -262,6 +298,17 @@ export function createApi(boron: Boron, store: Store) {
 			throw new HttpError(409, "This book is being read. Pause it, or wait for its pages to finish, then read the page again.");
 		}
 		return c.json({ ok: true });
+	});
+
+	// Every page marked to check or failed, read again from scratch (their edits are dropped, as for any re-run).
+	api.post("/books/:id/rerun-flagged", async (c) => {
+		const book = bookOf(c.req.param("id"));
+		const pages = store.pageSummaries(book.id).flatMap((p) => (p.status === "flagged" || p.status === "failed" ? [p.page] : []));
+		if (pages.length === 0) throw new HttpError(400, "No pages to check or failed");
+		if (!(await boron.rerun(book.id, pages))) {
+			throw new HttpError(409, "This book is being read. Pause it, or wait for its pages to finish, then read the pages again.");
+		}
+		return c.json({ pages: pages.length });
 	});
 
 	api.get("/books/:id/toc", (c) => {

@@ -29,6 +29,16 @@ Open http://localhost:3000.
 - **Health.** The container's health check calls `GET /api/health`.
 - **Providers.** `GEMINI_API_KEY` only seeds the first-run settings with a Gemini provider. Providers, keys, limits and prompts are edited on the Settings screen afterwards, and changes apply to the next request without a restart. Keys are stored in `/data/settings.json` and are never shown again in full.
 
+### Claude through pi
+
+In Settings, add **Claude (pi login)**. It uses the Claude login that [pi](https://pi.dev) stored in `~/.pi/agent/auth.json`, defaults to `claude-haiku-5-5`, and runs with thinking off. Boron refreshes the login under the same file lock as pi, so both keep working; if requests fail with an auth error, run `pi` and `/login`. Check that your Claude plan's terms allow this use. Requests count against your Claude plan's usage limits, so set **Per minute** and **Per day** to keep Boron from using all of it.
+
+In Docker, mount pi's agent directory (the lock file is created next to `auth.json`) and point Boron at it:
+
+```sh
+docker run ... -v ~/.pi/agent:/pi -e BORON_PI_AUTH=/pi/auth.json boron
+```
+
 ### Ollama or another local server
 
 In Settings, add an **Ollama** provider. Inside Docker, `localhost` is the container itself, so set the base URL to the host machine:

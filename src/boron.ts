@@ -146,11 +146,12 @@ export async function createBoron(options: BoronOptions) {
 			return () => listeners.delete(listener);
 		},
 
-		async addBook(fileName: string, pdf: Uint8Array) {
+		/** Add a book of the PDF's pages `firstPage` to `lastPage` (null = to the end), already checked against the PDF. */
+		async addBook(fileName: string, pdf: Uint8Array, range: { firstPage: number; lastPage: number | null } = { firstPage: 1, lastPage: null }) {
 			const id = randomUUID();
 			await mkdir(files.dir(id), { recursive: true });
 			await writeFile(files.source(id), pdf);
-			store.createBook({ id, fileName, title: fileName.replace(/\.pdf$/i, "") });
+			store.createBook({ id, fileName, title: fileName.replace(/\.pdf$/i, ""), ...range });
 			await start(id);
 			return id;
 		},
@@ -173,13 +174,18 @@ export async function createBoron(options: BoronOptions) {
 		rerun: (bookId: string, pages: number[]) =>
 			exclusive(bookId, async () => {
 				store.resetPages(bookId, pages);
-				const batchId = store.createBatch(bookId, pages, "pages", null);
-				const taskId = await root.commit(
-					(tx) =>
-						tx.createTask(pipeline.Batch, { bookId, batchId, pages, job: "pages" as const }, { ownership: { kind: "conversation" } }),
-					context,
-				);
-				store.updateBatch(batchId, { taskId });
+				// As many pages per request as a book job sends.
+				const size = settings().pagesPerRequest;
+				for (let i = 0; i < pages.length; i += size) {
+					const chunk = pages.slice(i, i + size);
+					const batchId = store.createBatch(bookId, chunk, "pages", null);
+					const taskId = await root.commit(
+						(tx) =>
+							tx.createTask(pipeline.Batch, { bookId, batchId, pages: chunk, job: "pages" as const }, { ownership: { kind: "conversation" } }),
+						context,
+					);
+					store.updateBatch(batchId, { taskId });
+				}
 				changed(bookId);
 			}),
 

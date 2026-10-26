@@ -9,7 +9,8 @@ export async function testProvider(p: ProviderConfig, image: Buffer): Promise<Pr
 	const model = models.getModel(p.id, p.model);
 	if (model === undefined) return { ok: false, error: `model ${p.model} is not available` };
 	const started = Date.now();
-	const answer = await models.complete(
+	// The simple API, as the pipeline uses through pi-durable: no reasoning level means thinking off.
+	const answer = await models.completeSimple(
 		model,
 		{
 			messages: [
