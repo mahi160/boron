@@ -6,6 +6,7 @@ import type { Boron } from "./boron.ts";
 import { assemblyPages, exportEpub } from "./epub/export.ts";
 import { proposeToc } from "./epub/assemble.ts";
 import { cropFigure } from "./figures.ts";
+import { pageLabels } from "./page-labels.ts";
 import { isObj } from "./json.ts";
 import type { Figure } from "./pipeline/contract.ts";
 import { testProvider } from "./provider-test.ts";
@@ -178,9 +179,11 @@ export function createApi(boron: Boron, store: Store) {
 		const book = bookOf(c.req.param("id"));
 		const now = Date.now();
 		const settings = getSettings();
+		const pages = store.pageSummaries(book.id);
+		const labels = pageLabels(pages.map((p) => ({ page: p.page, printed: p.printed, edited: p.pageLabel })));
 		return c.json({
 			book: libraryEntry(store, book),
-			pages: store.pageSummaries(book.id),
+			pages: pages.map((p) => ({ ...p, label: labels.get(p.page) ?? null })),
 			batches: store.batches(book.id),
 			parked: (await boron.parked()).filter((p) => p.bookId === book.id),
 			exhausted: settings.providers.flatMap((p) => {
@@ -218,6 +221,14 @@ export function createApi(boron: Boron, store: Store) {
 		const markdown = input.markdown === null ? null : str(input, "markdown", 200_000);
 		store.saveEdit(book.id, page, markdown);
 		return c.json(store.page(book.id, page));
+	});
+
+	api.put("/books/:id/pages/:page/label", async (c) => {
+		const book = bookOf(c.req.param("id"));
+		const page = pageOf(book, c.req.param("page"));
+		const input = await body(c);
+		store.savePageLabel(book.id, page, input.label === null ? null : str(input, "label", 20));
+		return c.json({ ok: true });
 	});
 
 	api.put("/books/:id/pages/:page/figures", async (c) => {
