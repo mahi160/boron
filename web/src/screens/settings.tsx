@@ -5,8 +5,17 @@ import { Button, ErrorLine, Field, Toggle, useAction } from "../ui.tsx";
 type Stage = keyof Settings["stages"];
 const STAGES: { id: Stage; label: string; hint: string }[] = [
 	{ id: "ocr", label: "OCR", hint: "Reads each page image into text." },
-	{ id: "proofread", label: "Proofread", hint: "Fixes OCR mistakes against the image, keeping the author's spelling." },
+	{ id: "proofread", label: "Proofread and translate", hint: "Fixes OCR mistakes against the image, keeping the author's spelling. EPUB translation (glossary, translate, polish) uses these providers too." },
 	{ id: "assemble", label: "Title page", hint: "Fills in title, author and publisher from the first pages." },
+];
+
+const PROMPTS: { key: keyof Settings["prompts"]; label: string }[] = [
+	{ key: "ocr", label: "OCR" },
+	{ key: "proofread", label: "Proofread" },
+	{ key: "metadata", label: "Title page" },
+	{ key: "glossary", label: "Translation glossary" },
+	{ key: "translate", label: "Translate" },
+	{ key: "polish", label: "Polish translation" },
 ];
 
 const PRESETS: { label: string; make: () => Omit<ProviderConfig, "id"> }[] = [
@@ -142,6 +151,15 @@ function SettingsForm({ initial }: { initial: Settings }) {
 				</div>
 			</Section>
 
+			<Section title="Translation" description="How English EPUBs are translated to Bangla.">
+				<div className="grid gap-4 sm:grid-cols-2">
+					<NumberField label="Words per chunk" hint="200–20000. One request per chunk; a paragraph is never split. Applies to books added after the change." min={200} max={20_000} value={s.chunkWords} onChange={(v) => set("chunkWords", v)} />
+				</div>
+				<div className="mt-5 flex flex-col divide-y divide-rule rounded-lg border border-border bg-surface">
+					<SwitchRow label="Polish" description="A second pass checks each draft against the English and makes it read fluently." checked={s.polish} onChange={(v) => set("polish", v)} />
+				</div>
+			</Section>
+
 			<Section title="Daily quota reset" description="When providers' daily limits start again. Gemini resets at midnight Pacific time.">
 				<div className="grid gap-4 sm:grid-cols-2">
 					<Field label="Time">
@@ -155,8 +173,8 @@ function SettingsForm({ initial }: { initial: Settings }) {
 
 			<Section title="Prompts" description="Instructions sent with every request. The answer format is added by Boron and cannot be changed here.">
 				<div className="flex flex-col gap-4">
-					{(["ocr", "proofread", "metadata"] as const).map((key) => (
-						<Field key={key} label={key === "ocr" ? "OCR" : key === "proofread" ? "Proofread" : "Title page"}>
+					{PROMPTS.map(({ key, label }) => (
+						<Field key={key} label={label}>
 							{(id) => (
 								<textarea id={id} rows={6} value={s.prompts[key]} onChange={(e) => set("prompts", { ...s.prompts, [key]: e.target.value })} className="font-mono text-[13px] leading-5" />
 							)}

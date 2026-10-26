@@ -3,9 +3,9 @@ import type { Figure, PageResult } from "../../src/pipeline/contract.ts";
 import type { PageLabel } from "../../src/page-labels.ts";
 import type { ProviderTestResult } from "../../src/provider-test.ts";
 import type { ProviderConfig, Settings } from "../../src/settings.ts";
-import type { BatchRow, Book, CostByBook, CostByModel, CostByStage, Cover, PageRow, PageStatus, PageSummary, Parked, TocEntry } from "../../src/store.ts";
+import type { BatchRow, Book, CostByBook, CostByModel, CostByStage, Cover, GlossaryEntry, PageRow, PageStatus, PageSummary, Parked, TocEntry } from "../../src/store.ts";
 
-export type { BatchRow, Book, CostByBook, CostByModel, CostByStage, Cover, Figure, PageLabel, PageResult, PageRow, PageStatus, PageSummary, Parked, ProviderConfig, ProviderTestResult, Settings, TocEntry };
+export type { BatchRow, Book, CostByBook, CostByModel, CostByStage, Cover, Figure, GlossaryEntry, PageLabel, PageResult, PageRow, PageStatus, PageSummary, Parked, ProviderConfig, ProviderTestResult, Settings, TocEntry };
 
 /** A book as the library lists it (`libraryEntry` on the server). */
 export type LibraryBook = Book & {

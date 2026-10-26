@@ -13,6 +13,14 @@ const CELL: Record<PageSummary["status"], string> = {
 
 const OPEN: BatchRow["state"][] = ["running", "retrying", "waiting", "queued"];
 
+const STEP: Record<string, string> = { ocr: "OCR", proofread: "Proofread", translate: "Translate", polish: "Polish" };
+
+function batchLabel(b: BatchRow, unit: string): string {
+	if (b.job === "metadata") return "Title page";
+	if (b.job === "glossary") return "Glossary";
+	return `${b.job === "translate" ? `${unit} ` : ""}${pageRanges(b.pages)}`;
+}
+
 export function Job({ detail, reload }: { detail: BookDetail; reload: () => Promise<void> }) {
 	const { book, pages, batches, parked, exhausted } = detail;
 	const now = useNow();
@@ -21,15 +29,19 @@ export function Job({ detail, reload }: { detail: BookDetail; reload: () => Prom
 	const closed = batches.filter((b) => !OPEN.includes(b.state)).slice(-8).reverse();
 	const statusCount = (s: PageSummary["status"]) => pages.filter((p) => p.status === s).length;
 	const rendering = book.status === "rendering";
+	// A translation book's pages are chunks of its text.
+	const translate = book.kind === "epub-translate";
+	const unit = translate ? "Chunk" : "Page";
+	const units = translate ? "chunks" : "pages";
 
 	return (
 		<div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
 			<div className="flex min-w-0 flex-col gap-4">
 				<Card
-					title="Pages"
+					title={translate ? "Chunks" : "Pages"}
 					aside={
 						<span className="text-xs text-faint tabular-nums">
-							{rendering ? `rendering ${count(book.rendered)} / ${count(book.pageCount)}` : `${count(book.pageCount)} pages`}
+							{rendering && !translate ? `rendering ${count(book.rendered)} / ${count(book.pageCount)}` : `${count(book.pageCount)} ${units}`}
 						</span>
 					}
 				>
@@ -40,30 +52,32 @@ export function Job({ detail, reload }: { detail: BookDetail; reload: () => Prom
 								<a
 									key={p.page}
 									href={href({ screen: "book", id: book.id, tab: "review", page: p.page })}
-									title={`Page ${p.page}: ${p.status}${p.flag ? ` — ${p.flag}` : ""}`}
-									aria-label={`Page ${p.page}, ${p.status}`}
+									title={`${unit} ${p.page}: ${p.status}${p.flag ? ` — ${p.flag}` : ""}`}
+									aria-label={`${unit} ${p.page}, ${p.status}`}
 									className={`aspect-[3/4] rounded-[2px] hover:outline hover:outline-1 hover:outline-ink ${CELL[p.status]}`}
 								/>
 							))}
-							{pages.length === 0 && <span className="col-span-full text-faint">Counting pages…</span>}
+							{pages.length === 0 && <span className="col-span-full text-faint">{translate ? "Splitting the book into chunks…" : "Counting pages…"}</span>}
 						</div>
 						<ul className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted tabular-nums">
-							<Legend className={CELL.done} label="Read" value={statusCount("done")} />
+							<Legend className={CELL.done} label={translate ? "Translated" : "Read"} value={statusCount("done")} />
 							<Legend className={CELL.flagged} label="To check" value={statusCount("flagged")} />
 							<Legend className={CELL.failed} label="Failed" value={statusCount("failed")} />
-							<Legend className={`${CELL.pending} border border-control`} label="Not read yet" value={statusCount("pending")} />
+							<Legend className={`${CELL.pending} border border-control`} label={translate ? "Not translated yet" : "Not read yet"} value={statusCount("pending")} />
 						</ul>
 					</div>
 				</Card>
 
 				<Card title="Requests" aside={<span className="text-xs text-faint">{open.length === 0 ? "none in progress" : `${open.length} in progress`}</span>}>
 					{batches.length === 0 ? (
-						<p className="px-5 py-4 text-faint">{rendering ? "Requests start once every page is rendered." : "No requests yet."}</p>
+						<p className="px-5 py-4 text-faint">
+							{rendering ? (translate ? "Requests start once the book is split into chunks." : "Requests start once every page is rendered.") : "No requests yet."}
+						</p>
 					) : (
 						<table className="w-full text-left tabular-nums">
 							<thead className="text-xs text-faint">
 								<tr className="h-9">
-									<th className="pl-5 font-normal">Pages</th>
+									<th className="pl-5 font-normal">{translate ? "Work" : "Pages"}</th>
 									<th className="font-normal">State</th>
 									<th className="font-normal">Provider</th>
 									<th className="pr-5 text-right font-normal">Tokens in / out</th>
@@ -73,8 +87,8 @@ export function Job({ detail, reload }: { detail: BookDetail; reload: () => Prom
 								{[...open, ...closed].map((b) => (
 									<tr key={b.id} className="border-t border-rule align-top">
 										<td className="py-2.5 pl-5">
-											{b.job === "metadata" ? "Title page" : pageRanges(b.pages)}
-											{b.stage !== null && b.job === "pages" && <span className="text-faint"> · {b.stage === "ocr" ? "OCR" : "Proofread"}</span>}
+											{batchLabel(b, unit)}
+											{b.stage !== null && (b.job === "pages" || b.job === "translate") && <span className="text-faint"> · {STEP[b.stage] ?? b.stage}</span>}
 										</td>
 										<td className="py-2.5">
 											<BatchState state={b.state} />
@@ -142,7 +156,7 @@ export function Job({ detail, reload }: { detail: BookDetail; reload: () => Prom
 								return (
 									<li key={p.taskId} className="flex items-center justify-between gap-3 rounded-md px-3 py-2">
 										<span className="min-w-0">
-											<span className="block">{batch === undefined ? "Book job" : `Pages ${pageRanges(batch.pages)}`}</span>
+											<span className="block">{batch === undefined ? "Book job" : batchLabel(batch, unit)}</span>
 											<span className="block truncate text-xs text-faint">{p.reason}</span>
 										</span>
 										<Button disabled={retry.busy} onClick={() => retry.run(() => api.post(`/parked/${p.taskId}/retry`).then(reload))}>

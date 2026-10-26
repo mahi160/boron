@@ -22,7 +22,9 @@ function summary(books: LibraryBook[], now: number): string {
 }
 
 export function Library() {
-	const { data: books, error } = useLive<LibraryBook[]>("/books", "*");
+	const { data: all, error } = useLive<LibraryBook[]>("/books", "*");
+	// Translation books are listed on the Translate screen.
+	const books = all?.filter((b) => b.kind === "pdf-ocr");
 	const upload = useAction();
 	const input = useRef<HTMLInputElement>(null);
 	const [dragging, setDragging] = useState(false);
@@ -183,8 +185,9 @@ export function Library() {
 	);
 }
 
-function BookRow({ book, now }: { book: LibraryBook; now: number }) {
+export function BookRow({ book, now }: { book: LibraryBook; now: number }) {
 	const read = book.done + book.flagged;
+	const hasCover = book.kind === "epub-translate" ? book.cover.kind !== "none" : book.rendered > 0;
 	const link = href({ screen: "book", id: book.id, tab: "job", page: 1 });
 	const waiting = book.nextWake !== null && book.nextWake > now && isActive(book.status);
 	return (
@@ -192,7 +195,7 @@ function BookRow({ book, now }: { book: LibraryBook; now: number }) {
 			<td className="pl-5">
 				<a href={link} className="flex items-center gap-3">
 					<span className="h-12 w-9 flex-none overflow-hidden rounded-sm border border-border bg-raised">
-						{book.rendered > 0 && <img src={urls.cover(book.id, `${book.rendered}`)} alt="" loading="lazy" className="h-full w-full object-cover" />}
+						{hasCover && <img src={urls.cover(book.id, `${book.rendered}`)} alt="" loading="lazy" className="h-full w-full object-cover" />}
 					</span>
 					<span className="min-w-0">
 						<span className="bangla block truncate text-[15px] font-medium leading-6">{book.title}</span>
@@ -214,7 +217,7 @@ function BookRow({ book, now }: { book: LibraryBook; now: number }) {
 						{book.flagged > 0 && <span className="text-faint"> · {book.flagged} to check</span>}
 						{book.failed > 0 && <span className="text-neg-ink"> · {book.failed} failed</span>}
 					</span>
-					<Progress value={read} total={book.pageCount} label={`${book.title}: pages read`} />
+					<Progress value={read} total={book.pageCount} label={`${book.title}: ${book.kind === "epub-translate" ? "chunks translated" : "pages read"}`} />
 				</div>
 			</td>
 			<td className="pr-5 text-right">

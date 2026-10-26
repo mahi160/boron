@@ -2,6 +2,7 @@ import { type ReactNode, useState } from "react";
 import { BookScreen } from "./screens/book.tsx";
 import { CostsScreen } from "./screens/costs.tsx";
 import { Library } from "./screens/library.tsx";
+import { TranslateLibrary } from "./screens/translate-library.tsx";
 import { SettingsScreen } from "./screens/settings.tsx";
 import { href, type Route, useRoute } from "./router.ts";
 
@@ -26,6 +27,7 @@ const icon = (d: string) => (
 	</svg>
 );
 const BOOKS = icon("M3 2.5h7.5a2 2 0 0 1 2 2v9H5a2 2 0 0 1-2-2zM3 11.5a2 2 0 0 1 2-2h7.5");
+const GLOBE = icon("M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM1.5 8h13M8 1.5c1.8 1.8 2.6 4 2.6 6.5S9.8 12.7 8 14.5C6.2 12.7 5.4 10.5 5.4 8S6.2 3.3 8 1.5z");
 const COINS = icon("M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zM10 5.5H7a1.25 1.25 0 0 0 0 2.5h2a1.25 1.25 0 0 1 0 2.5H6M8 4v1.5M8 10.5V12");
 const GEAR = icon("M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4");
 
@@ -36,6 +38,9 @@ export function App() {
 		<nav aria-label="Main" className="flex flex-col gap-0.5">
 			<NavItem to={{ screen: "library" }} active={route.screen === "library" || route.screen === "book"} icon={BOOKS}>
 				Library
+			</NavItem>
+			<NavItem to={{ screen: "translate" }} active={route.screen === "translate"} icon={GLOBE}>
+				Translate
 			</NavItem>
 			<NavItem to={{ screen: "costs" }} active={route.screen === "costs"} icon={COINS}>
 				Costs
@@ -67,6 +72,7 @@ export function App() {
 				{route.screen === "library" && <Library />}
 				{route.screen === "settings" && <SettingsScreen />}
 				{route.screen === "costs" && <CostsScreen />}
+				{route.screen === "translate" && <TranslateLibrary />}
 				{route.screen === "book" && <BookScreen key={route.id} route={route} />}
 			</main>
 		</div>

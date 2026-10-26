@@ -17,6 +17,7 @@ export function Details({ book, reload }: { book: Book; reload: () => Promise<vo
 	const file = useRef<HTMLInputElement>(null);
 	const dirty = FIELDS.some((f) => meta[f.key] !== book[f.key]);
 	const coverVersion = JSON.stringify(book.cover) + book.rendered;
+	const translate = book.kind === "epub-translate";
 
 	return (
 		<div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -28,7 +29,11 @@ export function Details({ book, reload }: { book: Book; reload: () => Promise<vo
 						void save.run(() => api.put(`/books/${book.id}/meta`, { ...meta, cover: book.cover }).then(reload));
 					}}
 				>
-					<p className="text-muted">Filled in from the title page when the book was read; they go into the EPUB as you save them.</p>
+					<p className="text-muted">
+						{translate
+							? "Taken from the English EPUB's metadata; enter the Bangla title and author here. They go into the EPUB as you save them."
+							: "Filled in from the title page when the book was read; they go into the EPUB as you save them."}
+					</p>
 					{FIELDS.map((f) => (
 						<Field key={f.key} label={f.label}>
 							{(id) => (
@@ -54,9 +59,21 @@ export function Details({ book, reload }: { book: Book; reload: () => Promise<vo
 
 			<Card title="Cover">
 				<div className="flex flex-col gap-4 p-5">
-					<img src={urls.cover(book.id, coverVersion)} alt={`Cover of ${book.title}`} className="aspect-[2/3] w-full rounded-sm border border-border bg-raised object-cover" />
-					<p className="text-xs text-faint">{book.cover.kind === "upload" ? "Your uploaded image." : `Page ${book.cover.page} of the scan.`}</p>
-					<div className="flex gap-2">
+					{book.cover.kind === "none" ? (
+						<div className="grid aspect-[2/3] w-full place-items-center rounded-sm border border-dashed border-control text-faint">No cover</div>
+					) : (
+						<img src={urls.cover(book.id, coverVersion)} alt={`Cover of ${book.title}`} className="aspect-[2/3] w-full rounded-sm border border-border bg-raised object-cover" />
+					)}
+					<p className="text-xs text-faint">
+						{book.cover.kind === "page"
+							? `Page ${book.cover.page} of the scan.`
+							: book.cover.kind === "none"
+								? "The EPUB has no cover; upload one if you like."
+								: translate
+									? "The English EPUB's cover, or your uploaded image."
+									: "Your uploaded image."}
+					</p>
+					<div className={translate ? "hidden" : "flex gap-2"}>
 						<input
 							type="number"
 							min={1}
