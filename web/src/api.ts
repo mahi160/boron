@@ -4,31 +4,9 @@ import type { PageLabel } from "../../src/page-labels.ts";
 import type { ProviderTestResult } from "../../src/provider-test.ts";
 import type { ProviderConfig, Settings } from "../../src/settings.ts";
 import type { BatchRow, Book, CostByBook, CostByModel, CostByStage, Cover, GlossaryEntry, PageRow, PageStatus, PageSummary, Parked, TocEntry } from "../../src/store.ts";
+import type { BookDetail, LibraryBook, TocResponse } from "../../src/wire.ts";
 
-export type { BatchRow, Book, CostByBook, CostByModel, CostByStage, Cover, Figure, GlossaryEntry, PageLabel, PageResult, PageRow, PageStatus, PageSummary, Parked, ProviderConfig, ProviderTestResult, Settings, TocEntry };
-
-/** A book as the library lists it (`libraryEntry` on the server). */
-export type LibraryBook = Book & {
-	done: number;
-	flagged: number;
-	failed: number;
-	/** Proofreading suggestions waiting for a decision, over all pages. */
-	suggestions: number;
-	nextWake: number | null;
-	inputTokens: number;
-	outputTokens: number;
-};
-
-export type BookDetail = {
-	book: LibraryBook;
-	/** `label`: the page's printed label (`pageLabels` on the server), null if it has none. */
-	pages: (PageSummary & { label: PageLabel | null })[];
-	batches: BatchRow[];
-	parked: Parked[];
-	exhausted: { provider: string; name: string; until: number }[];
-};
-
-export type TocResponse = { proposed: TocEntry[]; toc: TocEntry[]; edited: boolean };
+export type { BatchRow, Book, BookDetail, CostByBook, CostByModel, CostByStage, Cover, Figure, GlossaryEntry, LibraryBook, PageLabel, PageResult, PageRow, PageStatus, PageSummary, Parked, ProviderConfig, ProviderTestResult, Settings, TocEntry, TocResponse };
 
 export class ApiError extends Error {}
 
