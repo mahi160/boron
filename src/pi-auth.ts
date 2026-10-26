@@ -2,36 +2,46 @@ import { readFile, writeFile } from "node:fs/promises";
 import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
 import lockfile from "proper-lockfile";
 
-/** pi's key for the Claude login in its auth.json. */
-const PI_PROVIDER = "anthropic";
+/** How a login file's text maps to one pi-ai credential. */
+export interface LoginFormat {
+	/** The credential in `text`; `text` is undefined when the file does not exist. */
+	read(text: string | undefined): Credential | undefined;
+	/** The new file text holding `credential`, keeping everything else in `text`. */
+	write(text: string | undefined, credential: Credential): string;
+}
 
-type AuthFile = Record<string, Credential | undefined>;
+/** A credential file another tool owns, which Boron reads and refreshes but never logs out of. */
+export interface LoginSource {
+	path: string;
+	format: LoginFormat;
+	/** Shown when asked to log out. */
+	logoutHint: string;
+}
 
-async function readAuth(path: string): Promise<AuthFile> {
+async function readText(path: string): Promise<string | undefined> {
 	try {
-		return JSON.parse(await readFile(path, "utf8"));
+		return await readFile(path, "utf8");
 	} catch (error) {
-		if (error instanceof Error && "code" in error && error.code === "ENOENT") return {};
+		if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
 		throw error;
 	}
 }
 
 /**
- * pi's Claude login (`~/.pi/agent/auth.json`) as the credential of every Boron provider of kind "pi". Refreshing
- * rotates the refresh token, so writes take the same file lock as pi and re-read the file first; pi then sees the
- * new token too. Boron never removes the login.
+ * `source`'s login as the credential of every provider `owns` accepts. Refreshing rotates the refresh token, so
+ * writes take pi's file lock and re-read the file first; the owning tool then sees the new token too.
  */
-export function piCredentialStore(path: string, isPiProvider: (providerId: string) => boolean): CredentialStore {
-	const own = (id: string) => isPiProvider(id);
+export function loginCredentialStore(source: LoginSource, owns: (providerId: string) => boolean): CredentialStore {
+	const { path, format } = source;
 	return {
 		async read(providerId) {
-			return own(providerId) ? (await readAuth(path))[PI_PROVIDER] : undefined;
+			return owns(providerId) ? format.read(await readText(path)) : undefined;
 		},
 		async list(): Promise<readonly CredentialInfo[]> {
 			return [];
 		},
 		async modify(providerId, fn) {
-			if (!own(providerId)) return fn(undefined);
+			if (!owns(providerId)) return fn(undefined);
 			// A lost lock (another process took it as stale) must fail this write, not crash the server.
 			let compromised: Error | undefined;
 			// Same lock options as pi's own auth storage, so the two processes exclude each other.
@@ -44,18 +54,37 @@ export function piCredentialStore(path: string, isPiProvider: (providerId: strin
 				},
 			});
 			try {
-				const auth = await readAuth(path);
-				const next = await fn(auth[PI_PROVIDER]);
+				const text = await readText(path);
+				const current = format.read(text);
+				const next = await fn(current);
 				if (compromised !== undefined) throw compromised;
-				if (next === undefined) return auth[PI_PROVIDER];
-				await writeFile(path, JSON.stringify({ ...auth, [PI_PROVIDER]: next }, null, 2), { mode: 0o600 });
+				if (next === undefined) return current;
+				await writeFile(path, format.write(text, next), { mode: 0o600 });
 				return next;
 			} finally {
 				await release().catch(() => {});
 			}
 		},
 		async delete() {
-			throw new Error("Boron does not log out of pi; run `pi` and use /logout there");
+			throw new Error(`Boron does not log out of logins it borrows; ${source.logoutHint}`);
 		},
 	};
+}
+
+/** pi's key for the Claude login in its auth.json. */
+const PI_PROVIDER = "anthropic";
+
+type AuthFile = Record<string, Credential | undefined>;
+
+const parseAuth = (text: string | undefined): AuthFile => (text === undefined ? {} : JSON.parse(text));
+
+/** pi's auth.json: one credential per pi provider key. */
+export const piAuthFormat: LoginFormat = {
+	read: (text) => parseAuth(text)[PI_PROVIDER],
+	write: (text, credential) => JSON.stringify({ ...parseAuth(text), [PI_PROVIDER]: credential }, null, 2),
+};
+
+/** pi's Claude login (`~/.pi/agent/auth.json`) as the credential of every Boron provider of kind "pi". */
+export function piCredentialStore(path: string, isPiProvider: (providerId: string) => boolean): CredentialStore {
+	return loginCredentialStore({ path, format: piAuthFormat, logoutHint: "run `pi` and use /logout there" }, isPiProvider);
 }
