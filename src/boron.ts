@@ -6,7 +6,9 @@ import type { Models } from "@earendil-works/pi-ai";
 import { createRegistry, Harness, type Storage, type TaskId } from "@earendil-works/pi-durable";
 import type { SourceEpub } from "./epub/source.ts";
 import { toCoverJpeg } from "./figures.ts";
+import { failPages, planBatches } from "./pipeline/batches.ts";
 import type { Deps } from "./pipeline/deps.ts";
+import { PAGE_JOB } from "./pipeline/jobs.ts";
 import { createLimiter } from "./pipeline/limiter.ts";
 import { createPipeline } from "./pipeline/index.ts";
 import type { Settings } from "./settings.ts";
@@ -71,8 +73,7 @@ export async function createBoron(options: BoronOptions) {
 				const batch = store.batchByTask(Number(info.task.id));
 				if (batch !== undefined && info.type === "task_faulted") {
 					store.updateBatch(batch.id, { state: "failed", note: message.slice(0, 300) });
-					// The metadata batch only looks at the title pages; their text is not its to fail.
-					if (batch.job === "pages" || batch.job === "translate") for (const page of batch.pages) store.markPage(batch.bookId, page, "failed", message.slice(0, 300));
+					failPages(store, batch, message.slice(0, 300));
 					changed(batch.bookId);
 				}
 				const book = store.books().find((b) => b.taskId === Number(info.task.id));
@@ -192,20 +193,11 @@ export async function createBoron(options: BoronOptions) {
 		 */
 		rerun: (bookId: string, pages: number[]) =>
 			exclusive(bookId, async () => {
+				const book = store.book(bookId);
+				if (book === undefined) return;
 				store.resetPages(bookId, pages);
-				// As many pages per request as a book job sends; a translation book sends one chunk.
-				const translate = store.book(bookId)?.kind === "epub-translate";
-				const job = translate ? ("translate" as const) : ("pages" as const);
-				const size = translate ? 1 : settings().pagesPerRequest;
-				for (let i = 0; i < pages.length; i += size) {
-					const chunk = pages.slice(i, i + size);
-					const batchId = store.createBatch(bookId, chunk, job, null);
-					const taskId = await root.commit(
-						(tx) => tx.createTask(pipeline.Batch, { bookId, batchId, pages: chunk, job }, { ownership: { kind: "conversation" } }),
-						context,
-					);
-					store.updateBatch(batchId, { taskId });
-				}
+				const job = PAGE_JOB[book.kind];
+				await root.commit((tx) => planBatches(tx, { store, settings }, pipeline.Batch, { bookId, pages, job, owner: null }), context);
 				changed(bookId);
 			}),
 

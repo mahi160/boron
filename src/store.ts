@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { TaskId } from "@earendil-works/pi-durable";
-import { applyEdits, type Figure, type PageResult, proofreadText, type Suggestion } from "./pipeline/contract.ts";
+import type { Figure, PageResult, Suggestion } from "./pipeline/contract.ts";
 
 /** App data: books, pages, batches, limiter log. pi-durable keeps its own database for tasks. */
 
@@ -390,30 +390,8 @@ export function openStore(path: string) {
 				result.page,
 			);
 		},
-		/**
-		 * Accept or reject proofreading suggestions and rebuild the proofread text from the OCR text. A decision names its
-		 * suggestion by index and `find`, so one made on a page since read again does not hit another. A page the user
-		 * edited keeps their text, with the change applied or undone in it; where that text no longer has the words exactly
-		 * once, nothing is decided. Returns why it could not decide, or null.
-		 */
-		decideSuggestions(bookId: string, page: number, decisions: { index: number; find: string; status: "accepted" | "rejected" }[]): string | null {
-			const row = this.page(bookId, page);
-			if (row?.raw == null || row.proofread === null || row.suggestions === null) return "This page has no proofreading suggestions";
-			const suggestions = row.suggestions.map((s) => ({ ...s }));
-			let edited = row.edited;
-			for (const { index, find, status } of decisions) {
-				const s = suggestions[index];
-				if (s === undefined || s.find !== find || s.status === "auto") return "The suggestions of this page changed; reload it";
-				if (s.status === status) continue;
-				const change = status === "accepted" ? s : s.status === "accepted" ? { find: s.replace, replace: s.find } : null;
-				if (edited !== null && change !== null) {
-					const result = applyEdits(edited, [change]);
-					if (result.skipped > 0) return `Your edited text does not have \u201c${change.find}\u201d exactly once; change it in the text box instead`;
-					edited = result.markdown;
-				}
-				s.status = status;
-			}
-			const proofread = { ...row.proofread, markdown: proofreadText(row.raw.markdown, suggestions) };
+		/** Store a page's texts after suggestion decisions (`decideSuggestions`). */
+		saveDecisions(bookId: string, page: number, proofread: PageResult, suggestions: Suggestion[], edited: string | null) {
 			db.prepare("UPDATE pages SET proofread = ?, suggestions = ?, edited = ? WHERE book_id = ? AND page = ?").run(
 				JSON.stringify(proofread),
 				JSON.stringify(suggestions),

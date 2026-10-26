@@ -10,10 +10,11 @@ import { cropFigure, toCoverJpeg } from "./figures.ts";
 import { pageLabels } from "./page-labels.ts";
 import { isObj } from "./json.ts";
 import { pdfPageCount } from "./render.ts";
-import type { Figure } from "./pipeline/contract.ts";
+import { type Decision, decideSuggestions, type Figure } from "./pipeline/contract.ts";
 import { testProvider } from "./provider-test.ts";
 import { getSettings, parseSettings, publicSettings, saveSettings, type Settings } from "./settings.ts";
 import type { Book, GlossaryEntry, Store, TocEntry } from "./store.ts";
+import type { BookDetail, LibraryBook, TocResponse } from "./wire.ts";
 
 class HttpError extends Error {
 	readonly status: 400 | 403 | 404 | 409;
@@ -90,7 +91,7 @@ async function sampleImage(boron: Boron, store: Store): Promise<Buffer> {
 	return canvas.encode("jpeg", 90);
 }
 
-export function libraryEntry(store: Store, book: Book) {
+export function libraryEntry(store: Store, book: Book): LibraryBook {
 	const pages = store.pageSummaries(book.id);
 	const batches = store.batches(book.id);
 	const count = (status: string) => pages.filter((p) => p.status === status).length;
@@ -243,7 +244,7 @@ export function createApi(boron: Boron, store: Store) {
 				const until = store.exhaustedUntil(p.id, now);
 				return until === null ? [] : [{ provider: p.id, name: p.name, until }];
 			}),
-		});
+		} satisfies BookDetail);
 	});
 
 	api.get("/books/:id/costs", (c) => c.json(store.bookCosts(bookOf(c.req.param("id")).id)));
@@ -286,15 +287,18 @@ export function createApi(boron: Boron, store: Store) {
 		const page = pageOf(book, c.req.param("page"));
 		const list = (await body(c)).decisions;
 		if (!Array.isArray(list)) throw new HttpError(400, "decisions must be a list");
-		const decisions = list.map((d): { index: number; find: string; status: "accepted" | "rejected" } => {
+		const decisions = list.map((d): Decision => {
 			const status = isObj(d) ? d.status : undefined;
 			if (isObj(d) && Number.isInteger(d.index) && typeof d.find === "string" && (status === "accepted" || status === "rejected")) {
 				return { index: Number(d.index), find: d.find, status };
 			}
 			throw new HttpError(400, "each decision needs an index, its find text and a status of accepted or rejected");
 		});
-		const refused = store.decideSuggestions(book.id, page, decisions);
-		if (refused !== null) throw new HttpError(409, refused);
+		const row = store.page(book.id, page);
+		if (row === undefined) throw new HttpError(404, "No such page");
+		const decided = decideSuggestions(row, decisions);
+		if ("error" in decided) throw new HttpError(409, decided.error);
+		store.saveDecisions(book.id, page, decided.proofread, decided.suggestions, decided.edited);
 		return c.json(store.page(book.id, page));
 	});
 
@@ -353,7 +357,7 @@ export function createApi(boron: Boron, store: Store) {
 	api.get("/books/:id/toc", (c) => {
 		const book = bookOf(c.req.param("id"));
 		const proposed = proposeToc(assemblyPages(store.pages(book.id), false));
-		return c.json({ proposed, toc: book.toc ?? proposed, edited: book.toc !== null });
+		return c.json({ proposed, toc: book.toc ?? proposed, edited: book.toc !== null } satisfies TocResponse);
 	});
 
 	api.put("/books/:id/toc", async (c) => {
