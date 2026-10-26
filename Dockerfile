@@ -1,4 +1,4 @@
-# Boron: one image with the server, the web UI and Tesseract's Bangla model. Everything else lives in /data.
+# Boron: one image with the server, the web UI and Tesseract's Bangla and English models. Everything else lives in /data.
 FROM node:24-slim AS build
 WORKDIR /app
 RUN corepack enable
@@ -6,8 +6,8 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build && pnpm prune --prod
-# Fetch Tesseract's Bangla model once, at build time.
-RUN mkdir -p tessdata && node --input-type=module -e "import { createWorker } from 'tesseract.js'; const w = await createWorker('ben', 1, { cachePath: '/app/tessdata' }); await w.terminate();"
+# Fetch Tesseract's Bangla and English models once, at build time.
+RUN mkdir -p tessdata && node --input-type=module -e "import { createWorker } from 'tesseract.js'; const w = await createWorker(['ben', 'eng'], 1, { cachePath: '/app/tessdata' }); await w.terminate();"
 
 FROM node:24-slim
 WORKDIR /app

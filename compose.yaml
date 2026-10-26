@@ -1,0 +1,21 @@
+services:
+  boron:
+    build: .
+    image: boron
+    ports:
+      - "${PORT:-3000}:3000"
+    # GEMINI_API_KEY (and anything else) from .env; it only seeds the first-run settings.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: 3000
+    volumes:
+      - boron-data:/data
+    # Lets the container reach Ollama on the host as http://host.docker.internal:11434/v1 (also on Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  boron-data:
