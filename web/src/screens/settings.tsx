@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { api, type ProviderConfig, type ProviderTestResult, type Settings, useLive } from "../api.ts";
+import { api, type DetectedLogin, type DetectedOllama, type ProviderConfig, type ProviderTestResult, type Settings, useLive } from "../api.ts";
 import { Button, ErrorLine, Field, Toggle, useAction } from "../ui.tsx";
 
 type Stage = keyof Settings["stages"];
@@ -21,19 +21,15 @@ const PROMPTS: { key: keyof Settings["prompts"]; label: string }[] = [
 const PRESETS: { label: string; make: () => Omit<ProviderConfig, "id"> }[] = [
 	{
 		label: "Gemini",
-		make: () => ({ name: "Gemini", kind: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "", model: "gemini-flash-lite-latest", rpm: 10, rpd: 250, concurrency: 2, priceIn: null, priceOut: null }),
-	},
-	{
-		label: "Claude (pi login)",
-		make: () => ({ name: "Claude via pi", kind: "pi", baseUrl: "https://api.anthropic.com", apiKey: "", model: "claude-haiku-5-5", rpm: 0, rpd: 0, concurrency: 2, priceIn: null, priceOut: null }),
+		make: () => ({ name: "Gemini", kind: "openai", login: null, baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", apiKey: "", model: "gemini-flash-lite-latest", rpm: 10, rpd: 250, concurrency: 2, priceIn: null, priceOut: null }),
 	},
 	{
 		label: "OpenAI-compatible",
-		make: () => ({ name: "OpenAI-compatible", kind: "openai", baseUrl: "https://", apiKey: "", model: "", rpm: 0, rpd: 0, concurrency: 2, priceIn: null, priceOut: null }),
+		make: () => ({ name: "OpenAI-compatible", kind: "openai", login: null, baseUrl: "https://", apiKey: "", model: "", rpm: 0, rpd: 0, concurrency: 2, priceIn: null, priceOut: null }),
 	},
 	{
 		label: "Ollama",
-		make: () => ({ name: "Ollama", kind: "openai", baseUrl: "http://localhost:11434/v1", apiKey: "", model: "qwen2.5vl", rpm: 0, rpd: 0, concurrency: 1, priceIn: 0, priceOut: 0 }),
+		make: () => ({ name: "Ollama", kind: "openai", login: null, baseUrl: "http://localhost:11434/v1", apiKey: "", model: "qwen2.5vl", rpm: 0, rpd: 0, concurrency: 1, priceIn: 0, priceOut: 0 }),
 	},
 ];
 
@@ -61,6 +57,10 @@ function SettingsForm({ initial }: { initial: Settings }) {
 	const [saved, setSaved] = useState(initial);
 	const [s, setS] = useState(initial);
 	const save = useAction();
+	const logins = useLive<DetectedLogin[]>("/logins", "logins");
+	const ollama = useLive<DetectedOllama | null>("/ollama", "ollama");
+	const modelsOf = (p: ProviderConfig) =>
+		p.login !== null ? logins.data?.find((l) => l.id === p.login)?.models : ollama.data != null && p.baseUrl === ollama.data.baseUrl ? ollama.data.models : undefined;
 	const dirty = JSON.stringify(s) !== JSON.stringify(saved);
 	const set = <K extends keyof Settings>(key: K, value: Settings[K]) => setS({ ...s, [key]: value });
 
@@ -74,8 +74,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
 			stages: { ocr: s.stages.ocr.filter((x) => x !== id), proofread: s.stages.proofread.filter((x) => x !== id), assemble: s.stages.assemble.filter((x) => x !== id) },
 		});
 	}
-	function addProvider(preset: (typeof PRESETS)[number]) {
-		const p = preset.make();
+	function addProvider(p: Omit<ProviderConfig, "id">) {
 		const id = newId(p.name, s.providers.map((x) => x.id));
 		setS({
 			...s,
@@ -108,15 +107,64 @@ function SettingsForm({ initial }: { initial: Settings }) {
 			<Section title="Providers" description="Where pages are sent. Keys are stored on this server and only their last four characters are shown again.">
 				<div className="flex flex-col gap-3">
 					{s.providers.map((p, i) => (
-						<ProviderCard key={p.id} provider={p} onChange={(next) => setProvider(i, next)} onRemove={() => removeProvider(p.id)} />
+						<ProviderCard key={p.id} provider={p} models={modelsOf(p)} onChange={(next) => setProvider(i, next)} onRemove={() => removeProvider(p.id)} />
 					))}
 					<div className="flex flex-wrap items-center gap-2">
 						<span className="text-muted">Add</span>
 						{PRESETS.map((preset) => (
-							<Button key={preset.label} onClick={() => addProvider(preset)}>
+							<Button key={preset.label} onClick={() => addProvider(preset.make())}>
 								{preset.label}
 							</Button>
 						))}
+					</div>
+				</div>
+			</Section>
+
+			<Section
+				title="Detected logins"
+				description="A local Ollama, and subscription logins of pi, Claude Code and Codex on this server. Boron borrows and refreshes them but never logs out. Check that your plan's terms allow this use."
+			>
+				<div className="flex flex-col gap-3">
+					{logins.error !== null && <ErrorLine>{logins.error}</ErrorLine>}
+					{ollama.data != null && (
+						<div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-surface px-4 py-2.5">
+							<div>
+								<p className="font-medium">Ollama at {ollama.data.baseUrl}</p>
+								<p className="text-xs text-faint">{ollama.data.models.length === 0 ? "No vision models pulled yet, e.g. ollama pull qwen2.5vl" : `${ollama.data.models.length} image models`}</p>
+							</div>
+							<Button
+								disabled={ollama.data.models.length === 0}
+								onClick={() =>
+									ollama.data != null &&
+									addProvider({ name: "Ollama", kind: "openai", login: null, baseUrl: ollama.data.baseUrl, apiKey: "", model: ollama.data.models[0] ?? "", rpm: 0, rpd: 0, concurrency: 1, priceIn: 0, priceOut: 0 })
+								}
+							>
+								Add
+							</Button>
+						</div>
+					)}
+					{logins.data?.length === 0 && <p className="text-muted">No logins found. Sign in with pi, Claude Code or Codex on this machine, or mount their folders in Docker.</p>}
+					{logins.data !== undefined && logins.data.length > 0 && (
+						<ul className="flex flex-col divide-y divide-rule rounded-lg border border-border bg-surface">
+							{logins.data.map((l) => (
+								<li key={l.id} className="flex items-center justify-between gap-4 px-4 py-2.5">
+									<div>
+										<p className="font-medium">{l.label}</p>
+										<p className="text-xs text-faint">{l.models.length} image models</p>
+									</div>
+									<Button
+										onClick={() =>
+											addProvider({ name: l.label, kind: "login", login: l.id, baseUrl: "", apiKey: "", model: l.defaultModel, rpm: 0, rpd: 0, concurrency: 2, priceIn: null, priceOut: null })
+										}
+									>
+										Add
+									</Button>
+								</li>
+							))}
+						</ul>
+					)}
+					<div>
+						<Button onClick={() => void Promise.all([logins.reload(), ollama.reload()])}>Rescan</Button>
 					</div>
 				</div>
 			</Section>
@@ -229,7 +277,18 @@ function SwitchRow({ label, description, checked, onChange }: { label: string; d
 	);
 }
 
-function ProviderCard({ provider: p, onChange, onRemove }: { provider: ProviderConfig; onChange: (p: ProviderConfig) => void; onRemove: () => void }) {
+function ProviderCard({
+	provider: p,
+	models,
+	onChange,
+	onRemove,
+}: {
+	provider: ProviderConfig;
+	/** A login's image models, when the login is detected. */
+	models: string[] | undefined;
+	onChange: (p: ProviderConfig) => void;
+	onRemove: () => void;
+}) {
 	const test = useAction();
 	const [result, setResult] = useState<ProviderTestResult | null>(null);
 	const field = <K extends keyof ProviderConfig>(key: K, value: ProviderConfig[K]) => {
@@ -261,15 +320,25 @@ function ProviderCard({ provider: p, onChange, onRemove }: { provider: ProviderC
 		<div className="rounded-lg border border-border bg-surface">
 			<div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-2.5">
 				<input aria-label="Provider name" value={p.name} onChange={(e) => field("name", e.target.value)} className="h-8 border-transparent px-1 font-medium hover:border-border" />
-				<span className="text-xs text-faint">{p.kind === "pi" ? "Claude, signed in through pi" : "OpenAI-compatible"}</span>
+				<span className="text-xs text-faint">{p.kind === "login" ? "Subscription login" : "OpenAI-compatible"}</span>
 			</div>
 			<div className="grid gap-4 p-4 sm:grid-cols-2">
-				{p.kind !== "pi" && <Field label="Base URL">{(id) => <input id={id} type="url" required value={p.baseUrl} onChange={(e) => field("baseUrl", e.target.value)} />}</Field>}
-				<Field label="Model" hint={p.kind === "pi" ? "A Claude model, e.g. claude-haiku-5-5. Thinking is off." : undefined}>
-					{(id) => <input id={id} required value={p.model} onChange={(e) => field("model", e.target.value)} />}
+				{p.kind !== "login" && <Field label="Base URL">{(id) => <input id={id} type="url" required value={p.baseUrl} onChange={(e) => field("baseUrl", e.target.value)} />}</Field>}
+				<Field label="Model" hint={p.kind === "login" ? "Models that read images; thinking is off." : undefined}>
+					{(id) =>
+						models === undefined ? (
+							<input id={id} required value={p.model} onChange={(e) => field("model", e.target.value)} />
+						) : (
+							<select id={id} required value={p.model} onChange={(e) => field("model", e.target.value)}>
+								{[...new Set([p.model, ...models])].filter((m) => m !== "").map((m) => (
+									<option key={m}>{m}</option>
+								))}
+							</select>
+						)
+					}
 				</Field>
-				{p.kind === "pi" ? (
-					<p className="text-sm text-muted">Uses the Claude login of pi on this machine (~/.pi/agent/auth.json). Run pi and /login if requests fail with an auth error.</p>
+				{p.kind === "login" ? (
+					<p className="text-sm text-muted">Borrows a login on this server (see Detected logins). If requests fail with an auth error, sign in again in that tool.</p>
 				) : (
 					<Field label="API key" hint={p.kind === "openai" ? "Leave empty for a local server." : undefined}>
 						{(id) => <input id={id} type={p.apiKey.startsWith("\u2022") ? "text" : "password"} autoComplete="off" value={p.apiKey} onChange={(e) => field("apiKey", e.target.value)} />}
@@ -284,7 +353,7 @@ function ProviderCard({ provider: p, onChange, onRemove }: { provider: ProviderC
 					{price("priceIn", "Input price")}
 					{price("priceOut", "Output price")}
 					<p className="self-center text-xs text-faint sm:col-span-2">
-						USD per million tokens, for the Costs screen. Empty uses the catalog price of known Gemini and Claude models; set 0 on a free tier{p.kind === "pi" ? " or if your Claude plan covers it" : ""}.
+						USD per million tokens, for the Costs screen. Empty uses the catalog price of known Gemini, Claude and ChatGPT models; set 0 on a free tier{p.kind === "login" ? " or if your plan covers it" : ""}.
 					</p>
 				</div>
 			</div>

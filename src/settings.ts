@@ -3,7 +3,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { paths } from "./config.ts";
 import { isObj, type Obj } from "./json.ts";
-import { piModelIds } from "./models.ts";
+import { isLoginId, type LoginId, LOGINS, loginModelIds } from "./logins.ts";
 import { DEFAULT_PROMPTS } from "./pipeline/prompts.ts";
 
 export const STAGES = ["ocr", "proofread", "assemble"] as const;
@@ -12,8 +12,10 @@ export type Stage = (typeof STAGES)[number];
 export type ProviderConfig = {
 	id: string;
 	name: string;
-	/** `openai`: any OpenAI-compatible endpoint (Gemini's, Ollama, vLLM, OpenRouter). `pi`: Claude through pi's login. */
-	kind: "openai" | "pi";
+	/** `openai`: any OpenAI-compatible endpoint (Gemini's, Ollama, vLLM, OpenRouter). `login`: a detected subscription login. */
+	kind: "openai" | "login";
+	/** Which login a `login` provider borrows; null for `openai`. */
+	login: LoginId | null;
 	baseUrl: string;
 	apiKey: string;
 	model: string;
@@ -53,8 +55,6 @@ export type Settings = {
 export const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
 /** The native Gemini API of the removed "gemini" kind, migrated to GEMINI_BASE_URL. */
 const GEMINI_NATIVE_URL = /^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/*$/;
-export const PI_BASE_URL = "https://api.anthropic.com";
-export const PI_DEFAULT_MODEL = "claude-haiku-5-5";
 
 export function defaultSettings(): Settings {
 	const key = process.env.GEMINI_API_KEY;
@@ -64,6 +64,7 @@ export function defaultSettings(): Settings {
 					id: "gemini",
 					name: "Gemini",
 					kind: "openai",
+					login: null,
 					baseUrl: GEMINI_BASE_URL,
 					apiKey: key,
 					// Alias for the newest Flash-Lite: the cheapest current Gemini with a free tier.
@@ -163,15 +164,18 @@ function parseProvider(raw: unknown, stored: Settings): ProviderConfig {
 	if (!/^[a-z0-9-]{1,40}$/.test(id)) throw new Invalid(`provider id "${id}" must be 1–40 of a–z, 0–9 and -`);
 	// Settings saved before the native Gemini kind was dropped: same provider through Gemini's OpenAI-compatible endpoint.
 	const gemini = raw.kind === "gemini";
-	const kind = gemini ? "openai" : raw.kind;
-	if (kind !== "openai" && kind !== "pi") throw new Invalid(`provider ${id}: kind must be openai or pi`);
+	// Settings saved when pi's Claude login was the only one: kind "pi".
+	const kind = gemini ? "openai" : raw.kind === "pi" ? "login" : raw.kind;
+	if (kind !== "openai" && kind !== "login") throw new Invalid(`provider ${id}: kind must be openai or login`);
+	const login = kind === "openai" ? null : raw.kind === "pi" ? "pi-claude" : raw.login;
+	if (login !== null && !isLoginId(login)) throw new Invalid(`provider ${id}: unknown login "${String(login)}"`);
 	const model = text(raw, "model");
 	if (model === "") throw new Invalid(`provider ${id}: model is required`);
-	if (kind === "pi" && !piModelIds().includes(model)) {
-		throw new Invalid(`provider ${id}: ${model} is not a Claude vision model that can run with thinking off (try ${PI_DEFAULT_MODEL})`);
+	if (login !== null && !loginModelIds(login).includes(model)) {
+		throw new Invalid(`provider ${id}: ${model} is not a vision model of this login that can run with thinking off (try ${LOGINS[login].defaultModel})`);
 	}
-	// pi's login carries its own endpoint and credential.
-	const endpoint: Obj = kind === "pi" ? { baseUrl: PI_BASE_URL, apiKey: "" } : raw;
+	// A login carries its own endpoint and credential.
+	const endpoint: Obj = login !== null ? { baseUrl: LOGINS[login].provider().baseUrl, apiKey: "" } : raw;
 	const given = text(endpoint, "baseUrl");
 	const baseUrl = gemini && (given === "" || GEMINI_NATIVE_URL.test(given)) ? GEMINI_BASE_URL : given;
 	if (!/^https?:\/\/\S+$/.test(baseUrl)) throw new Invalid(`provider ${id}: base URL must start with http:// or https://`);
@@ -190,6 +194,7 @@ function parseProvider(raw: unknown, stored: Settings): ProviderConfig {
 		id,
 		name: text(raw, "name") || id,
 		kind,
+		login,
 		baseUrl: baseUrl.replace(/\/+$/, ""),
 		apiKey,
 		model,

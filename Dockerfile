@@ -12,6 +12,8 @@ RUN mkdir -p tessdata && node --input-type=module -e "import { createWorker } fr
 FROM node:24-slim
 WORKDIR /app
 ENV NODE_ENV=production BORON_DATA_DIR=/data BORON_TESSDATA=/app/tessdata PORT=3000
+# Where mounted login folders are looked for; a folder that is not mounted is simply not detected.
+ENV BORON_PI_AUTH=/logins/pi/auth.json BORON_CLAUDE_CREDENTIALS=/logins/claude/.credentials.json BORON_CODEX_AUTH=/logins/codex/auth.json
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/src ./src

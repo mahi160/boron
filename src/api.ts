@@ -7,6 +7,8 @@ import { assemblyPages, exportEpub, exportTranslation } from "./epub/export.ts";
 import { proposeToc } from "./epub/assemble.ts";
 import { EpubError, readEpub } from "./epub/source.ts";
 import { cropFigure, toCoverJpeg } from "./figures.ts";
+import { detectLogins } from "./logins.ts";
+import { detectOllama } from "./ollama.ts";
 import { pageLabels } from "./page-labels.ts";
 import { isObj } from "./json.ts";
 import { pdfPageCount } from "./render.ts";
@@ -145,7 +147,8 @@ export function createApi(boron: Boron, store: Store) {
 	const jpeg = (data: Uint8Array) =>
 		new Response(data, { headers: { "content-type": "image/jpeg", "cache-control": "no-cache" } });
 
-	api.get("/health", (c) => c.json({ ok: true }));
+	// Which tools' logins are mounted, by name only.
+	api.get("/health", async (c) => c.json({ ok: true, logins: [...new Set((await detectLogins()).map((l) => l.tool))] }));
 
 	api.get("/events", (c) =>
 		streamSSE(c, async (stream) => {
@@ -440,6 +443,10 @@ export function createApi(boron: Boron, store: Store) {
 	});
 
 	api.get("/settings", (c) => c.json(publicSettings(getSettings())));
+
+	api.get("/logins", async (c) => c.json(await detectLogins()));
+
+	api.get("/ollama", async (c) => c.json(await detectOllama()));
 
 	api.put("/settings", async (c) => {
 		const parsed = parseSettings(await body(c), getSettings());

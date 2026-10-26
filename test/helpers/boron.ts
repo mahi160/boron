@@ -16,7 +16,7 @@ import { makePdf } from "./pdf.ts";
 import { tempDir } from "./books.ts";
 
 export function provider(id: string, limits: Partial<ProviderConfig> = {}): ProviderConfig {
-	return { id, name: id.toUpperCase(), kind: "openai", baseUrl: "http://faux", apiKey: "", model: "vision", rpm: 0, rpd: 0, concurrency: 0, priceIn: null, priceOut: null, ...limits };
+	return { id, name: id.toUpperCase(), kind: "openai", login: null, baseUrl: "http://faux", apiKey: "", model: "vision", rpm: 0, rpd: 0, concurrency: 0, priceIn: null, priceOut: null, ...limits };
 }
 
 export function testSettings(overrides: Partial<Settings> = {}): Settings {

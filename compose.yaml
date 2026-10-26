@@ -12,6 +12,11 @@ services:
       PORT: 3000
     volumes:
       - boron-data:/data
+      # Subscription logins to borrow (see README). Uncomment the ones you have; they must be read-write,
+      # because Boron writes refreshed tokens back.
+      # - ~/.pi/agent:/logins/pi
+      # - ~/.claude:/logins/claude
+      # - ~/.codex:/logins/codex
     # Lets the container reach Ollama on the host as http://host.docker.internal:11434/v1 (also on Linux).
     extra_hosts:
       - "host.docker.internal:host-gateway"

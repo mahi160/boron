@@ -11,8 +11,10 @@ export const paths = {
 	// The Docker image ships the Bangla model outside the data volume.
 	tessdata: process.env.BORON_TESSDATA ?? join(DATA_DIR, "tessdata"),
 	books: join(DATA_DIR, "books"),
-	// pi's login file, for providers of kind "pi" (in Docker, mount pi's agent directory and point this at it).
+	// Login files of other tools, borrowed by providers of kind "login" (in Docker, mount the folders; see README).
 	piAuth: process.env.BORON_PI_AUTH ?? join(homedir(), ".pi", "agent", "auth.json"),
+	claudeCodeCredentials: process.env.BORON_CLAUDE_CREDENTIALS ?? join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), ".credentials.json"),
+	codexAuth: process.env.BORON_CODEX_AUTH ?? join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "auth.json"),
 };
 
 export const PORT = Number(process.env.PORT ?? 3000);

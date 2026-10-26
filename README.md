@@ -28,22 +28,34 @@ docker compose up -d --build
 Open http://localhost:3000.
 
 - **Data.** Everything is stored in the `/data` volume: books, page images, settings and job state. Stop and start the container freely; a job that was running continues where it stopped.
-- **Health.** The container's health check calls `GET /api/health`.
+- **Health.** The container's health check calls `GET /api/health`. Its answer lists which tools' logins were detected (`pi`, `Claude Code`, `Codex`), never a token.
 - **Providers.** `GEMINI_API_KEY` only seeds the first-run settings with a Gemini provider, which talks to Gemini's OpenAI-compatible endpoint (`https://generativelanguage.googleapis.com/v1beta/openai`). Every manually added provider is OpenAI-compatible; Gemini providers saved by older versions load as one automatically, keeping their key, model, limits and stage order. Providers, keys, limits and prompts are edited on the Settings screen afterwards, and changes apply to the next request without a restart. Keys are stored in `/data/settings.json` and are never shown again in full.
 
-### Claude through pi
+### Subscription logins (pi, Claude Code, Codex)
 
-In Settings, add **Claude (pi login)**. It uses the Claude login that [pi](https://pi.dev) stored in `~/.pi/agent/auth.json`, defaults to `claude-haiku-5-5`, and runs with thinking off. Boron refreshes the login under the same file lock as pi, so both keep working; if requests fail with an auth error, run `pi` and `/login`. Check that your Claude plan's terms allow this use. Requests count against your Claude plan's usage limits, so set **Per minute** and **Per day** to keep Boron from using all of it.
+Boron can borrow a Claude or ChatGPT subscription login that another tool on the same machine already holds. Settings → **Detected logins** lists every one it finds (press **Rescan** after signing in); **Add** turns one into a provider, offering only models that read images. Requests run with thinking off.
 
-In Docker, mount pi's agent directory (the lock file is created next to `auth.json`) and point Boron at it:
+| Source | File | Logins |
+| --- | --- | --- |
+| [pi](https://pi.dev) | `~/.pi/agent/auth.json` (`BORON_PI_AUTH`) | Claude, ChatGPT |
+| Claude Code (Linux) | `~/.claude/.credentials.json` (`BORON_CLAUDE_CREDENTIALS`) | Claude. On macOS Claude Code keeps it in the Keychain, which Boron cannot read. |
+| Codex | `~/.codex/auth.json` (`BORON_CODEX_AUTH`) | ChatGPT; a file holding only an `OPENAI_API_KEY` is offered as an OpenAI API key |
+
+Boron refreshes a token only when it is about to expire and re-reads the file right before writing it back. For pi it also takes pi's own lock file, so the two never refresh at once. Claude Code and Codex do not take that lock: if one of them refreshes at the same moment as Boron, one side may have to sign in again. It never logs out or deletes a login; if requests fail with an auth error, sign in again in that tool.
+
+**Terms of service.** Using a subscription login from another app may not be allowed by your plan's terms (Anthropic's for Claude, OpenAI's for ChatGPT). Check them before you use it, and accept the risk to your account. Requests count against your plan's usage limits, so set **Per minute** and **Per day** to keep Boron from using all of it.
+
+In Docker, mount the folders you have read-write under `/logins` (the image points the variables above there; a folder that is not mounted is simply not detected):
 
 ```sh
-docker run ... -v ~/.pi/agent:/pi -e BORON_PI_AUTH=/pi/auth.json boron
+docker run ... -v ~/.pi/agent:/logins/pi -v ~/.claude:/logins/claude -v ~/.codex:/logins/codex boron
 ```
+
+With Compose, uncomment the matching lines in `compose.yaml`. Boron rewrites the existing files in place, so they keep their owner and permissions on the host; do not mount a folder that does not exist yet, or Docker creates it owned by root.
 
 ### Ollama or another local server
 
-In Settings, add an **Ollama** provider. Inside Docker, `localhost` is the container itself, so set the base URL to the host machine:
+Boron looks for Ollama on its default port (`http://localhost:11434`, then `http://host.docker.internal:11434`; set `BORON_OLLAMA_URL` to override). When it answers, Settings → Detected logins offers it with its pulled vision models, and the provider's model is picked from a list. Otherwise, add an **Ollama** provider by hand. Inside Docker, `localhost` is the container itself, so set the base URL to the host machine:
 
 ```
 http://host.docker.internal:11434/v1

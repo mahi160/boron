@@ -96,6 +96,7 @@ describe("limiter", () => {
 		id: "p",
 		name: "p",
 		kind: "openai",
+		login: null,
 		baseUrl: "http://localhost",
 		apiKey: "",
 		model: "m",

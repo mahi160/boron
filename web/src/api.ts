@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Figure, PageResult } from "../../src/pipeline/contract.ts";
+import type { DetectedLogin } from "../../src/logins.ts";
+import type { DetectedOllama } from "../../src/ollama.ts";
 import type { PageLabel } from "../../src/page-labels.ts";
 import type { ProviderTestResult } from "../../src/provider-test.ts";
 import type { ProviderConfig, Settings } from "../../src/settings.ts";
 import type { BatchRow, Book, CostByBook, CostByModel, CostByStage, Cover, GlossaryEntry, PageRow, PageStatus, PageSummary, Parked, TocEntry } from "../../src/store.ts";
 import type { BookDetail, LibraryBook, TocResponse } from "../../src/wire.ts";
 
-export type { BatchRow, Book, BookDetail, CostByBook, CostByModel, CostByStage, Cover, Figure, GlossaryEntry, LibraryBook, PageLabel, PageResult, PageRow, PageStatus, PageSummary, Parked, ProviderConfig, ProviderTestResult, Settings, TocEntry, TocResponse };
+export type { BatchRow, Book, BookDetail, CostByBook, CostByModel, CostByStage, Cover, DetectedLogin, DetectedOllama, Figure, GlossaryEntry, LibraryBook, PageLabel, PageResult, PageRow, PageStatus, PageSummary, Parked, ProviderConfig, ProviderTestResult, Settings, TocEntry, TocResponse };
 
 export class ApiError extends Error {}
 
