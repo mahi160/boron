@@ -17,6 +17,12 @@ docker build -t boron .
 docker run -d --name boron -p 3000:3000 -v boron-data:/data -e GEMINI_API_KEY=your-key boron
 ```
 
+Or with Docker Compose, which reads `GEMINI_API_KEY` from `.env`:
+
+```sh
+docker compose up -d --build
+```
+
 Open http://localhost:3000.
 
 - **Data.** Everything is stored in the `/data` volume: books, page images, settings and job state. Stop and start the container freely; a job that was running continues where it stopped.
@@ -35,7 +41,7 @@ On Linux, also start the container with `--add-host=host.docker.internal:host-ga
 
 ### Without any provider
 
-With no provider configured, pages are read offline by Tesseract (`ben`). Its quality is well below a vision model's, especially on conjuncts and vowel signs. When Tesseract stands in for a provider that is out of quota, the page is marked "Check".
+With no provider configured, pages are read offline by Tesseract (`ben+eng`). Its quality is well below a vision model's, especially on conjuncts and vowel signs. When Tesseract stands in for a provider that is out of quota, the page is marked "Check".
 
 ## Gemini free tier: read this first
 
